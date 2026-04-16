@@ -1,0 +1,2143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Duck Evolution</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #7dd3fc;
+            touch-action: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #gameCanvas {
+            display: block;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        #xp-fill {
+            transition: width 0.3s ease-out;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Canvas for the Game -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Overlay -->
+    <div class="ui-layer flex flex-col justify-between p-4 md:p-6">
+        <!-- Top Bar -->
+        <div class="flex justify-between items-start">
+            <div class="bg-white/80 backdrop-blur-sm rounded-xl p-3 shadow-lg border border-white/50 pointer-events-auto">
+                <h1 class="text-xl md:text-2xl font-bold text-gray-800 tracking-tight">Duck Evolution <span id="current-emoji">🐥</span></h1>
+                <p class="text-sm font-semibold text-gray-600 mt-1">Level <span id="level-ui">1</span>: <span id="duck-name" class="text-blue-600">Baby Duck</span></p>
+                <div class="mt-2 text-sm text-gray-500 font-medium">Score: <span id="score-ui">0</span></div>
+            </div>
+            
+            <div class="flex flex-col items-end gap-2">
+                <div class="bg-white/80 backdrop-blur-sm rounded-xl p-3 shadow-lg border border-white/50 text-right pointer-events-auto">
+                    <p class="text-xs md:text-sm text-gray-600 font-semibold mb-1">Controls</p>
+                    <p class="text-xs text-gray-500">🖱️ Mouse / Touch to steer</p>
+                    <p class="text-xs text-gray-500">⌨️ WASD / Arrows to move</p>
+                    <p class="text-xs text-gray-500">🖱️ Scroll to zoom</p>
+                    <p class="text-xs text-gray-500">🖱️ Right-click drag to look</p>
+                </div>
+                
+                <!-- Account / Save Controls -->
+                <div class="bg-white/80 backdrop-blur-sm rounded-xl p-3 shadow-lg border border-white/50 text-right pointer-events-auto flex flex-col gap-2 w-full">
+                    <div id="save-indicator" class="text-xs font-bold text-green-500 opacity-0 transition-opacity text-center">Progress Saved! ✓</div>
+                    <button id="save-btn" class="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors w-full">Save Game</button>
+                    <button id="reset-btn" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors w-full">Reset Progress</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Bar (XP) -->
+        <div class="w-full max-w-2xl mx-auto mb-4 pointer-events-auto">
+            <div class="flex justify-between text-white font-bold text-sm mb-1 drop-shadow-md px-1">
+                <span>XP</span>
+                <span id="xp-text">0 / 50</span>
+            </div>
+            <div class="h-6 w-full bg-gray-900/40 rounded-full border-2 border-white/50 overflow-hidden shadow-inner relative">
+                <div id="xp-fill" class="h-full bg-gradient-to-r from-blue-400 to-cyan-300 rounded-full w-0 relative">
+                    <div class="absolute top-0 right-0 bottom-0 left-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPgo8cmVjdCB3aWR0aD0iOCIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAuMSIvPgo8L3N2Zz4=')] opacity-50"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Level Up Notification -->
+    <div id="level-up-notification" class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 transition-opacity duration-500 z-50">
+        <div class="text-center transform scale-90 transition-transform duration-500" id="level-up-content">
+            <div class="text-6xl md:text-9xl drop-shadow-2xl mb-4" id="level-up-emoji">🦆</div>
+            <h2 class="text-4xl md:text-6xl font-black text-white drop-shadow-[0_4px_4px_rgba(0,0,0,0.5)] tracking-wider uppercase text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-yellow-600">EVOLUTION!</h2>
+            <p class="text-xl md:text-2xl text-white font-bold mt-2 drop-shadow-lg">You are now a <span id="level-up-name">Normal Duck</span>!</p>
+        </div>
+    </div>
+
+    <!-- Container for floating text -->
+    <div id="floating-text-container" class="absolute inset-0 pointer-events-none overflow-hidden z-40"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        init3DGame();
+
+        function init3DGame() {
+            // UI Elements
+            const xpFill = document.getElementById('xp-fill');
+            const xpText = document.getElementById('xp-text');
+            const levelUi = document.getElementById('level-ui');
+            const duckNameUi = document.getElementById('duck-name');
+            const currentEmojiUi = document.getElementById('current-emoji');
+            const scoreUi = document.getElementById('score-ui');
+            const levelUpNotification = document.getElementById('level-up-notification');
+            const levelUpContent = document.getElementById('level-up-content');
+            const levelUpEmoji = document.getElementById('level-up-emoji');
+            const levelUpName = document.getElementById('level-up-name');
+            const floatingContainer = document.getElementById('floating-text-container');
+
+            // Three.js Setup
+            const canvas = document.getElementById('gameCanvas');
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x7dd3fc); // Sky blue
+            // PERFORMANCE: Increased fog slightly to hide the shorter render distance
+            scene.fog = new THREE.FogExp2(0x7dd3fc, 0.00015);
+
+            // PERFORMANCE: Reduced camera render distance from 35000 to 10000 to heavily reduce GPU load
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+            camera.position.set(0, 100, 200); // Set initial pos to avoid fly-in glitch
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight.position.set(200, 300, 100);
+            dirLight.castShadow = true;
+            dirLight.shadow.camera.left = -600;
+            dirLight.shadow.camera.right = 600;
+            dirLight.shadow.camera.top = 600;
+            dirLight.shadow.camera.bottom = -600;
+            // PERFORMANCE: Halved shadow map resolution to boost FPS
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            // Ground / Water
+            const groundGeo = new THREE.PlaneGeometry(50000, 50000); // Massively expanded for 25 biomes
+            const groundMat = new THREE.MeshLambertMaterial({ color: 0x38bdf8 }); // Water color
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            const raycastPlane = new THREE.Mesh(groundGeo, new THREE.MeshBasicMaterial({ visible: false }));
+            raycastPlane.rotation.x = -Math.PI / 2;
+            scene.add(raycastPlane);
+
+            // --- POND AREAS (BIOMES) perfectly spaced in a massive concentric grid to prevent overlaps ---
+            const POND_AREAS = [
+                // Ring 1 (Close to center)
+                { type: 'shallow', color: 0xfde047, x: 2000, z: 2000, radius: 400, unlockLevel: 2, foodType: 'bread' },
+                { type: 'mud', color: 0xa16207, x: -2000, z: 2000, radius: 450, unlockLevel: 3, foodType: 'bug' },
+                { type: 'deep', color: 0x0284c7, x: -2000, z: -2000, radius: 500, unlockLevel: 4, foodType: 'fish' },
+                { type: 'mystic', color: 0xa855f7, x: 2000, z: -2000, radius: 350, unlockLevel: 5, foodType: 'star' },
+                // Ring 2
+                { type: 'cyber', color: 0x06b6d4, x: 5000, z: 0, radius: 400, unlockLevel: 6, foodType: 'battery' },
+                { type: 'cosmic', color: 0x0f172a, x: -5000, z: 0, radius: 450, unlockLevel: 7, foodType: 'galaxy_core' },
+                { type: 'royal', color: 0xfcd34d, x: 0, z: 5000, radius: 400, unlockLevel: 8, foodType: 'golden_egg' },
+                { type: 'quantum', color: 0x14b8a6, x: 0, z: -5000, radius: 450, unlockLevel: 9, foodType: 'quark' },
+                // Ring 3
+                { type: 'multiverse', color: 0xffffff, x: 5000, z: 5000, radius: 500, unlockLevel: 10, foodType: 'universe' },
+                { type: 'chrono', color: 0xb45309, x: -5000, z: 5000, radius: 700, unlockLevel: 11, foodType: 'hourglass' },
+                { type: 'magma', color: 0xef4444, x: -5000, z: -5000, radius: 750, unlockLevel: 12, foodType: 'sun_flame' },
+                { type: 'glitch', color: 0x10b981, x: 5000, z: -5000, radius: 800, unlockLevel: 13, foodType: 'glitch_frag' },
+                // Ring 4
+                { type: 'heaven', color: 0xfef08a, x: 9000, z: 0, radius: 850, unlockLevel: 14, foodType: 'halo' },
+                { type: 'crystal', color: 0x22d3ee, x: -9000, z: 0, radius: 950, unlockLevel: 15, foodType: 'mana_gem' },
+                { type: 'hyper', color: 0xd946ef, x: 0, z: 9000, radius: 1050, unlockLevel: 16, foodType: 'tesseract' },
+                { type: 'void', color: 0x000000, x: 0, z: -9000, radius: 1150, unlockLevel: 17, foodType: 'dark_matter' },
+                // Ring 5
+                { type: 'abstract', color: 0x8b5cf6, x: 9000, z: 9000, radius: 1250, unlockLevel: 18, foodType: 'abstract_thought' },
+                { type: 'omni', color: 0xf43f5e, x: -9000, z: 9000, radius: 1400, unlockLevel: 19, foodType: 'omni_seed' },
+                { type: 'matrix', color: 0x00ff00, x: -9000, z: -9000, radius: 1600, unlockLevel: 20, foodType: 'source_code' },
+                { type: 'tesseract_zone', color: 0x8b5cf6, x: 9000, z: -9000, radius: 1800, unlockLevel: 21, foodType: '4d_cube' },
+                // Ring 6 (The Farthest Reaches)
+                { type: 'world_tree', color: 0x15803d, x: 14000, z: 0, radius: 2000, unlockLevel: 22, foodType: 'golden_apple' },
+                { type: 'quacksar', color: 0xf97316, x: -14000, z: 0, radius: 2200, unlockLevel: 23, foodType: 'accretion_dust' },
+                { type: 'simulation', color: 0x22d3ee, x: 0, z: 14000, radius: 2400, unlockLevel: 24, foodType: 'sim_token' },
+                { type: 'desk', color: 0x475569, x: 0, z: -14000, radius: 3000, unlockLevel: 25, foodType: 'coffee_cup' }
+            ];
+
+            // Render pond areas
+            POND_AREAS.forEach(area => {
+                const areaGeo = new THREE.CylinderGeometry(area.radius, area.radius, 2, 32);
+                const areaMat = new THREE.MeshLambertMaterial({ color: area.color });
+                const areaMesh = new THREE.Mesh(areaGeo, areaMat);
+                areaMesh.position.set(area.x, 0.5, area.z); // Slightly above base water
+                areaMesh.receiveShadow = true;
+                scene.add(areaMesh);
+
+                // Forcefield Barrier (Visible until unlocked)
+                const barrierGeo = new THREE.CylinderGeometry(area.radius, area.radius, 200 + area.radius*0.2, 32, 1, true);
+                const barrierMat = new THREE.MeshBasicMaterial({ 
+                    color: area.color, 
+                    transparent: true, 
+                    opacity: 0.25, 
+                    side: THREE.DoubleSide,
+                    wireframe: true
+                });
+                const barrierMesh = new THREE.Mesh(barrierGeo, barrierMat);
+                barrierMesh.position.set(area.x, 100 + area.radius*0.1, area.z);
+                scene.add(barrierMesh);
+                area.barrierMesh = barrierMesh;
+
+                // Area-specific decorations
+                if (area.type === 'shallow') {
+                    // Sandy rocks
+                    for(let i=0; i<20; i++) {
+                        const rockGeo = new THREE.DodecahedronGeometry(Math.random() * 15 + 5, 0);
+                        const rockMat = new THREE.MeshLambertMaterial({ color: 0x9ca3af });
+                        const rock = new THREE.Mesh(rockGeo, rockMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        rock.position.set(area.x + Math.cos(angle)*r, 5, area.z + Math.sin(angle)*r);
+                        rock.rotation.set(Math.random(), Math.random(), Math.random());
+                        rock.castShadow = true;
+                        rock.receiveShadow = true;
+                        scene.add(rock);
+                    }
+                } else if (area.type === 'mud') {
+                    // Cattails
+                    for(let i=0; i<40; i++) {
+                        const reedGeo = new THREE.CylinderGeometry(1, 1, Math.random()*15 + 20, 6);
+                        const reedMat = new THREE.MeshLambertMaterial({ color: 0x65a30d });
+                        const reed = new THREE.Mesh(reedGeo, reedMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        reed.position.set(area.x + Math.cos(angle)*r, 10, area.z + Math.sin(angle)*r);
+                        
+                        const topGeo = new THREE.CylinderGeometry(2, 2, 8, 8);
+                        const topMat = new THREE.MeshLambertMaterial({ color: 0x451a03 });
+                        const top = new THREE.Mesh(topGeo, topMat);
+                        top.position.y = 10;
+                        reed.add(top);
+                        
+                        reed.castShadow = true;
+                        scene.add(reed);
+                    }
+                } else if (area.type === 'mystic') {
+                    // Glowing crystals / orbs
+                    for(let i=0; i<15; i++) {
+                        const orbGeo = new THREE.OctahedronGeometry(Math.random() * 8 + 4, 0);
+                        const orbMat = new THREE.MeshLambertMaterial({ color: 0xe879f9, emissive: 0xc026d3, emissiveIntensity: 0.5 });
+                        const orb = new THREE.Mesh(orbGeo, orbMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        orb.position.set(area.x + Math.cos(angle)*r, Math.random() * 10 + 5, area.z + Math.sin(angle)*r);
+                        orb.castShadow = true;
+                        scene.add(orb);
+                    }
+                } else if (area.type === 'cyber') {
+                    // Data pillars
+                    for(let i=0; i<25; i++) {
+                        const pillarGeo = new THREE.BoxGeometry(Math.random() * 15 + 5, Math.random() * 50 + 20, Math.random() * 15 + 5);
+                        const pillarMat = new THREE.MeshLambertMaterial({ color: 0x164e63, emissive: 0x06b6d4, emissiveIntensity: 0.4, wireframe: Math.random() > 0.4 });
+                        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        pillar.position.set(area.x + Math.cos(angle)*r, 10, area.z + Math.sin(angle)*r);
+                        pillar.castShadow = true;
+                        scene.add(pillar);
+                    }
+                } else if (area.type === 'cosmic') {
+                    // Floating asteroids
+                    for(let i=0; i<35; i++) {
+                        const astGeo = new THREE.DodecahedronGeometry(Math.random() * 15 + 5, 0);
+                        const astMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+                        const asteroid = new THREE.Mesh(astGeo, astMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        asteroid.position.set(area.x + Math.cos(angle)*r, Math.random() * 50 + 10, area.z + Math.sin(angle)*r);
+                        asteroid.rotation.set(Math.random(), Math.random(), Math.random());
+                        asteroid.castShadow = true;
+                        scene.add(asteroid);
+                    }
+                } else if (area.type === 'royal') {
+                    // Golden pillars
+                    for(let i=0; i<15; i++) {
+                        const pillarGeo = new THREE.CylinderGeometry(8, 8, 40, 16);
+                        const pillarMat = new THREE.MeshLambertMaterial({ color: 0xfbbf24, emissive: 0xb45309 });
+                        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        pillar.position.set(area.x + Math.cos(angle)*r, 20, area.z + Math.sin(angle)*r);
+                        pillar.castShadow = true;
+                        scene.add(pillar);
+                    }
+                } else if (area.type === 'quantum') {
+                    // Floating geometry
+                    for(let i=0; i<20; i++) {
+                        const geo = new THREE.IcosahedronGeometry(Math.random() * 10 + 5, 0);
+                        const mat = new THREE.MeshLambertMaterial({ color: 0x2dd4bf, transparent: true, opacity: 0.7, wireframe: true });
+                        const shape = new THREE.Mesh(geo, mat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        shape.position.set(area.x + Math.cos(angle)*r, Math.random() * 40 + 10, area.z + Math.sin(angle)*r);
+                        shape.rotation.set(Math.random(), Math.random(), Math.random());
+                        scene.add(shape);
+                    }
+                } else if (area.type === 'multiverse') {
+                    // Floating Orbs of light
+                    for(let i=0; i<20; i++) {
+                        const orbGeo = new THREE.SphereGeometry(10, 16, 16);
+                        const orbMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                        const orb = new THREE.Mesh(orbGeo, orbMat);
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        orb.position.set(area.x + Math.cos(angle)*r, Math.random() * 60 + 20, area.z + Math.sin(angle)*r);
+                        scene.add(orb);
+                        
+                        const ringGeo = new THREE.RingGeometry(15, 20, 32);
+                        const ringMat = new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide });
+                        const ring = new THREE.Mesh(ringGeo, ringMat);
+                        ring.rotation.x = Math.PI / 2;
+                        orb.add(ring);
+                    }
+                } else if (area.type === 'chrono') {
+                    for(let i=0; i<15; i++) {
+                        const gearGeo = new THREE.TorusGeometry(Math.random()*20+10, 4, 8, 12);
+                        const gear = new THREE.Mesh(gearGeo, new THREE.MeshLambertMaterial({color: 0x78350f}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        gear.position.set(area.x + Math.cos(angle)*r, 20, area.z + Math.sin(angle)*r);
+                        gear.rotation.set(Math.random(), Math.random(), Math.random());
+                        scene.add(gear);
+                    }
+                } else if (area.type === 'magma') {
+                    for(let i=0; i<20; i++) {
+                        const spoutGeo = new THREE.ConeGeometry(Math.random()*15+5, Math.random()*60+20, 8);
+                        const spout = new THREE.Mesh(spoutGeo, new THREE.MeshLambertMaterial({color: 0x7f1d1d, emissive: 0xb91c1c}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        spout.position.set(area.x + Math.cos(angle)*r, 10, area.z + Math.sin(angle)*r);
+                        scene.add(spout);
+                    }
+                } else if (area.type === 'glitch') {
+                    for(let i=0; i<30; i++) {
+                        const boxGeo = new THREE.BoxGeometry(Math.random()*30+10, Math.random()*30+10, Math.random()*30+10);
+                        const box = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({color: 0x10b981, wireframe: true}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        box.position.set(area.x + Math.cos(angle)*r, Math.random()*50, area.z + Math.sin(angle)*r);
+                        scene.add(box);
+                    }
+                } else if (area.type === 'heaven') {
+                    for(let i=0; i<25; i++) {
+                        const cloudGeo = new THREE.DodecahedronGeometry(Math.random()*30+15, 1);
+                        const cloud = new THREE.Mesh(cloudGeo, new THREE.MeshLambertMaterial({color: 0xffffff, transparent: true, opacity: 0.8}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        cloud.position.set(area.x + Math.cos(angle)*r, Math.random()*100+40, area.z + Math.sin(angle)*r);
+                        scene.add(cloud);
+                    }
+                } else if (area.type === 'crystal') {
+                    for(let i=0; i<25; i++) {
+                        const cryGeo = new THREE.OctahedronGeometry(Math.random()*20+10, 0);
+                        const cry = new THREE.Mesh(cryGeo, new THREE.MeshLambertMaterial({color: 0x67e8f9, emissive: 0x0891b2}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        cry.position.set(area.x + Math.cos(angle)*r, Math.random()*40, area.z + Math.sin(angle)*r);
+                        cry.scale.set(1, 2.5, 1);
+                        scene.add(cry);
+                    }
+                } else if (area.type === 'hyper') {
+                    for(let i=0; i<15; i++) {
+                        const hypGeo = new THREE.OctahedronGeometry(Math.random()*40+20, 0);
+                        const hyp = new THREE.Mesh(hypGeo, new THREE.MeshLambertMaterial({color: 0xd946ef, wireframe: true}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        hyp.position.set(area.x + Math.cos(angle)*r, Math.random()*80+20, area.z + Math.sin(angle)*r);
+                        scene.add(hyp);
+                    }
+                } else if (area.type === 'matrix') {
+                    for(let i=0; i<40; i++) {
+                        const colGeo = new THREE.CylinderGeometry(5, 5, Math.random()*200+50, 4);
+                        const col = new THREE.Mesh(colGeo, new THREE.MeshBasicMaterial({color: 0x00ff00, wireframe: true}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        col.position.set(area.x + Math.cos(angle)*r, 0, area.z + Math.sin(angle)*r);
+                        scene.add(col);
+                    }
+                } else if (area.type === 'tesseract_zone') {
+                    for(let i=0; i<20; i++) {
+                        const m = new THREE.Mesh(new THREE.BoxGeometry(Math.random()*40+20, Math.random()*40+20, Math.random()*40+20), new THREE.MeshBasicMaterial({color: 0x8b5cf6, wireframe: true}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        m.position.set(area.x + Math.cos(angle)*r, Math.random()*100+20, area.z + Math.sin(angle)*r);
+                        m.rotation.set(Math.random(), Math.random(), Math.random());
+                        scene.add(m);
+                    }
+                } else if (area.type === 'world_tree') {
+                    for(let i=0; i<25; i++) {
+                        const m = new THREE.Mesh(new THREE.CylinderGeometry(Math.random()*20+10, Math.random()*20+10, Math.random()*150+50, 8), new THREE.MeshLambertMaterial({color: 0x78350f}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        m.position.set(area.x + Math.cos(angle)*r, 0, area.z + Math.sin(angle)*r);
+                        m.rotation.x = (Math.random()-0.5)*0.5;
+                        m.rotation.z = (Math.random()-0.5)*0.5;
+                        scene.add(m);
+                    }
+                } else if (area.type === 'quacksar') {
+                    for(let i=0; i<30; i++) {
+                        const m = new THREE.Mesh(new THREE.SphereGeometry(Math.random()*15+5, 8, 8), new THREE.MeshBasicMaterial({color: 0xf97316}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        m.position.set(area.x + Math.cos(angle)*r, Math.random()*200, area.z + Math.sin(angle)*r);
+                        scene.add(m);
+                    }
+                } else if (area.type === 'simulation') {
+                    for(let i=0; i<40; i++) {
+                        const m = new THREE.Mesh(new THREE.IcosahedronGeometry(Math.random()*30+10, 0), new THREE.MeshBasicMaterial({color: 0x22d3ee, wireframe: true}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        m.position.set(area.x + Math.cos(angle)*r, Math.random()*150, area.z + Math.sin(angle)*r);
+                        scene.add(m);
+                    }
+                } else if (area.type === 'desk') {
+                    for(let i=0; i<15; i++) {
+                        const m = new THREE.Mesh(new THREE.BoxGeometry(Math.random()*60+30, Math.random()*20+10, Math.random()*60+30), new THREE.MeshLambertMaterial({color: 0x94a3b8}));
+                        const angle = Math.random() * Math.PI * 2;
+                        const r = Math.random() * area.radius * 0.8;
+                        m.position.set(area.x + Math.cos(angle)*r, Math.random()*50, area.z + Math.sin(angle)*r);
+                        scene.add(m);
+                    }
+                }
+            });
+
+            // Detailed Lilypads (Global)
+            const lilyMat = new THREE.MeshLambertMaterial({ color: 0x22c55e });
+            const flowerMat = new THREE.MeshLambertMaterial({ color: 0xff69b4 });
+            for (let i = 0; i < 200; i++) {
+                const size = Math.random() * 20 + 10;
+                // Pac-man shaped lilypad (slice taken out)
+                const lilyGeo = new THREE.CylinderGeometry(size, size, 2, 16, 1, false, 0, Math.PI * 1.8);
+                const lily = new THREE.Mesh(lilyGeo, lilyMat);
+                lily.position.set((Math.random() - 0.5) * 5000, 1.5, (Math.random() - 0.5) * 5000);
+                lily.rotation.y = Math.random() * Math.PI * 2;
+                lily.receiveShadow = true;
+                
+                // Add a cute lotus flower to some lilypads
+                if (Math.random() < 0.3) {
+                    const flower = new THREE.Mesh(new THREE.DodecahedronGeometry(size*0.25, 0), flowerMat);
+                    flower.position.set(size*0.4, 1.5, size*0.2);
+                    flower.castShadow = true;
+                    lily.add(flower);
+                }
+                scene.add(lily);
+            }
+
+            // Game Configuration
+            const WORLD_SIZE = 40000; // Massively increased bounds to fit the new layout without hitting walls
+            const FOOD_COUNT = 2500; // Increased for lush biomes
+            const MAX_FOOD = 2500;
+            
+            // Reduced speeds across all evolutions for better control
+            const EVOLUTIONS = [
+                { level: 1, name: "Baby Duck", emoji: "🐥", size: 6, speed: 1.2, maxExp: 100, colors: { body: 0xffd700, head: 0xffec8b, beak: 0xff8c00 } },
+                { level: 2, name: "Normal Duck", emoji: "🦆", size: 10, speed: 1.5, maxExp: 400, colors: { body: 0x8b4513, head: 0x228b22, beak: 0xffd700 } },
+                { level: 3, name: "Wild Goose", emoji: "🪿", size: 15, speed: 1.8, maxExp: 1000, colors: { body: 0xa9a9a9, head: 0x808080, beak: 0xd2691e } },
+                { level: 4, name: "Majestic Swan", emoji: "🦢", size: 22, speed: 2.1, maxExp: 2500, colors: { body: 0xffffff, head: 0xffffff, beak: 0xffa500 } },
+                { level: 5, name: "Prehistoric Quack", emoji: "🦖", size: 28, speed: 2.4, maxExp: 6000, colors: { body: 0x166534, head: 0x14532d, beak: 0xd4d4d8 } },
+                { level: 6, name: "Mecha Mallard", emoji: "🤖", size: 34, speed: 2.8, maxExp: 15000, colors: { body: 0x9ca3af, head: 0x4b5563, beak: 0xf97316 } },
+                { level: 7, name: "Cosmic Dragon", emoji: "🐉", size: 45, speed: 3.2, maxExp: 35000, colors: { body: 0x4b0082, head: 0x8a2be2, beak: 0xffd700 } },
+                { level: 8, name: "Galactic Emperor", emoji: "👑", size: 55, speed: 3.6, maxExp: 80000, colors: { body: 0xffffff, head: 0xffffff, beak: 0xfacc15 } },
+                { level: 9, name: "Quantum Duck", emoji: "⚛️", size: 70, speed: 4.0, maxExp: 180000, colors: { body: 0x06b6d4, head: 0x06b6d4, beak: 0x22d3ee } },
+                { level: 10, name: "Multiverse Creator", emoji: "👁️", size: 90, speed: 4.5, maxExp: 400000, colors: { body: 0xfacc15, head: 0xfacc15, beak: 0xffffff } },
+                { level: 11, name: "Chrono Duck", emoji: "⏳", size: 110, speed: 4.8, maxExp: 900000, colors: { body: 0xb45309, head: 0xd97706, beak: 0x78350f } },
+                { level: 12, name: "Celestial Phoenix", emoji: "🔥", size: 130, speed: 5.1, maxExp: 2000000, colors: { body: 0xef4444, head: 0xf97316, beak: 0xfacc15 } },
+                { level: 13, name: "Void Glitch", emoji: "👾", size: 150, speed: 5.4, maxExp: 4500000, colors: { body: 0x000000, head: 0x10b981, beak: 0x000000 } },
+                { level: 14, name: "Neon Seraphim", emoji: "👼", size: 175, speed: 5.7, maxExp: 10000000, colors: { body: 0xffffff, head: 0xfef08a, beak: 0xfde047 } },
+                { level: 15, name: "Crystal Leviathan", emoji: "💎", size: 200, speed: 6.0, maxExp: 25000000, colors: { body: 0x67e8f9, head: 0x22d3ee, beak: 0x0891b2 } },
+                { level: 16, name: "Hyper-Prism", emoji: "🔺", size: 230, speed: 6.3, maxExp: 60000000, colors: { body: 0xd946ef, head: 0xf0abfc, beak: 0xc026d3 } },
+                { level: 17, name: "Stellar Devourer", emoji: "🌌", size: 260, speed: 6.6, maxExp: 150000000, colors: { body: 0x020617, head: 0x0f172a, beak: 0x1e293b } },
+                { level: 18, name: "Concept of Quack", emoji: "🧠", size: 300, speed: 6.9, maxExp: 400000000, colors: { body: 0x8b5cf6, head: 0xa78bfa, beak: 0xc4b5fd } },
+                { level: 19, name: "Omniversal Overlord", emoji: "♾️", size: 350, speed: 7.2, maxExp: 1000000000, colors: { body: 0xffffff, head: 0x000000, beak: 0xff0000 } },
+                { level: 20, name: "The Architect", emoji: "💻", size: 420, speed: 8.0, maxExp: 2500000000, colors: { body: 0x00ff00, head: 0x00ff00, beak: 0x00ff00 } },
+                // NEW 21-25 EVOLUTIONS
+                { level: 21, name: "Tesseract Duck", emoji: "🧊", size: 500, speed: 8.5, maxExp: 5000000000, colors: { body: 0x8b5cf6, head: 0xc4b5fd, beak: 0xede9fe } },
+                { level: 22, name: "Yggdrasil Mallard", emoji: "🌳", size: 600, speed: 9.0, maxExp: 15000000000, colors: { body: 0x78350f, head: 0x15803d, beak: 0xfacc15 } },
+                { level: 23, name: "Supermassive Quacksar", emoji: "🌀", size: 750, speed: 9.5, maxExp: 50000000000, colors: { body: 0x000000, head: 0xf97316, beak: 0xffffff } },
+                { level: 24, name: "The Simulation", emoji: "🌌", size: 900, speed: 10.0, maxExp: 150000000000, colors: { body: 0x22d3ee, head: 0x0891b2, beak: 0x67e8f9 } },
+                { level: 25, name: "The Developer", emoji: "👨‍💻", size: 1200, speed: 12.0, maxExp: Infinity, colors: { body: 0x1e293b, head: 0x94a3b8, beak: 0xffffff } },
+                // SECRET EVOLUTION
+                { level: 26, name: "Omega Glitch Duck", emoji: "👾", size: 1500, speed: 15.0, maxExp: Infinity, colors: { body: 0x000000, head: 0xff00ff, beak: 0x00ffff } }
+            ];
+
+            // Re-balanced weights to ensure every biome has an abundance of food
+            const FOOD_TYPES = [
+                { type: 'seed', xp: 5, weight: 150, size: 3, color: 0x4ade80 }, // Increased starter food weight
+                { type: 'bread', xp: 15, weight: 40, size: 5, color: 0xd97706 },
+                { type: 'bug', xp: 25, weight: 40, size: 4, color: 0xef4444 },
+                { type: 'fish', xp: 50, weight: 40, size: 6, color: 0x3b82f6 },
+                { type: 'star', xp: 100, weight: 40, size: 8, color: 0xe879f9 },
+                { type: 'battery', xp: 250, weight: 40, size: 7, color: 0x22d3ee },
+                { type: 'galaxy_core', xp: 500, weight: 40, size: 10, color: 0xfcd34d },
+                { type: 'golden_egg', xp: 1000, weight: 40, size: 9, color: 0xffb700 },
+                { type: 'quark', xp: 2500, weight: 40, size: 8, color: 0x2dd4bf },
+                { type: 'universe', xp: 5000, weight: 40, size: 12, color: 0xffffff },
+                { type: 'hourglass', xp: 10000, weight: 40, size: 15, color: 0xd97706 },
+                { type: 'sun_flame', xp: 20000, weight: 40, size: 18, color: 0xf97316 },
+                { type: 'glitch_frag', xp: 40000, weight: 40, size: 20, color: 0x10b981 },
+                { type: 'halo', xp: 80000, weight: 40, size: 24, color: 0xfef08a },
+                { type: 'mana_gem', xp: 150000, weight: 40, size: 28, color: 0x22d3ee },
+                { type: 'tesseract', xp: 300000, weight: 40, size: 35, color: 0xd946ef },
+                { type: 'dark_matter', xp: 600000, weight: 40, size: 42, color: 0x0f172a },
+                { type: 'abstract_thought', xp: 1500000, weight: 40, size: 50, color: 0x8b5cf6 },
+                { type: 'omni_seed', xp: 4000000, weight: 40, size: 65, color: 0xffffff },
+                { type: 'source_code', xp: 10000000, weight: 40, size: 80, color: 0x00ff00 },
+                // NEW L21-25 FOODS
+                { type: '4d_cube', xp: 50000000, weight: 40, size: 100, color: 0x8b5cf6 },
+                { type: 'golden_apple', xp: 150000000, weight: 40, size: 120, color: 0xfacc15 },
+                { type: 'accretion_dust', xp: 400000000, weight: 40, size: 150, color: 0xf97316 },
+                { type: 'sim_token', xp: 1000000000, weight: 40, size: 180, color: 0x22d3ee },
+                { type: 'coffee_cup', xp: 5000000000, weight: 40, size: 250, color: 0xffffff }
+            ];
+
+            // Game State
+            let foods = [];
+            let particles = [];
+            let score = 0;
+            let player = {
+                group: new THREE.Group(),
+                modelGroup: null, // Sub-group for clean animation
+                stageIndex: 0,
+                xp: 0,
+                vx: 0,
+                vz: 0,
+                targetRotation: 0,
+                wobble: 0
+            };
+
+            scene.add(player.group);
+
+            // Input handling
+            let keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false };
+            let mouse = new THREE.Vector2();
+            let isLeftMouseDown = false;
+            let isRightMouseDown = false;
+            let lastMouseX = 0;
+            let lastMouseY = 0;
+            let cameraAngleOffset = 0;
+            let mouseWorldPos = new THREE.Vector3();
+            let cameraZoom = 1.0;
+            const raycaster = new THREE.Raycaster();
+
+            // --- MULTIPLAYER SETUP ---
+            let isOnline = false;
+            let auth, db, appId, userId, playerDocRef, saveDocRef;
+            let otherPlayers = {}; // Track other online players
+            let unsubscribePlayers = null;
+
+            if (typeof __firebase_config !== 'undefined') {
+                try {
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    const app = initializeApp(firebaseConfig);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+                    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    isOnline = true;
+                    
+                    const initAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (err) {
+                            console.error("Auth error", err);
+                        }
+                    };
+                    initAuth();
+
+                    onAuthStateChanged(auth, async (user) => {
+                        // Always clear listeners when auth state changes
+                        if (unsubscribePlayers) {
+                            unsubscribePlayers();
+                            unsubscribePlayers = null;
+                        }
+
+                        // Clear existing other players from the scene
+                        for (const uid in otherPlayers) {
+                            scene.remove(otherPlayers[uid].group);
+                            delete otherPlayers[uid];
+                        }
+
+                        if (!user) {
+                            userId = null;
+                            playerDocRef = null;
+                            saveDocRef = null;
+                            return;
+                        }
+
+                        userId = user.uid;
+                        playerDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', userId);
+                        saveDocRef = doc(db, 'artifacts', appId, 'users', userId, 'saveData', 'progress');
+
+                        // Load Player Progress
+                        try {
+                            const saveSnap = await getDoc(saveDocRef);
+                            if (saveSnap.exists()) {
+                                const data = saveSnap.data();
+                                player.stageIndex = data.stageIndex || 0;
+                                player.xp = data.xp || 0;
+                                score = data.score || 0;
+                                loadPlayerModel(player.stageIndex);
+                                updateUI();
+                                console.log("Progress loaded!");
+                            } else {
+                                // Reset to defaults if new/empty account
+                                player.stageIndex = 0;
+                                player.xp = 0;
+                                score = 0;
+                                loadPlayerModel(0);
+                                updateUI();
+                            }
+                        } catch (e) {
+                            console.error("Failed to load progress:", e);
+                        }
+                        
+                        const playersCol = collection(db, 'artifacts', appId, 'public', 'data', 'players');
+                        unsubscribePlayers = onSnapshot(playersCol, (snapshot) => {
+                            const currentUids = new Set();
+                            snapshot.forEach(docSnap => {
+                                if (docSnap.id === userId) return; // Skip our own local character
+                                const data = docSnap.data();
+                                
+                                // Ignore stale players (disconnected longer than 15 seconds)
+                                if (Date.now() - data.timestamp > 15000) return;
+                                
+                                currentUids.add(docSnap.id);
+                                
+                                if (!otherPlayers[docSnap.id]) {
+                                    createOtherPlayer(docSnap.id, data.stageIndex, data.x, data.z, data.rot);
+                                } else {
+                                    const p = otherPlayers[docSnap.id];
+                                    p.targetX = data.x;
+                                    p.targetZ = data.z;
+                                    p.targetRot = data.rot;
+                                    
+                                    // Re-build model if they evolved!
+                                    if (p.stageIndex !== data.stageIndex) {
+                                        scene.remove(p.group);
+                                        delete otherPlayers[docSnap.id];
+                                        createOtherPlayer(docSnap.id, data.stageIndex, data.x, data.z, data.rot);
+                                    }
+                                }
+                            });
+                            
+                            // Cleanup players that have left or timed out
+                            for (const uid in otherPlayers) {
+                                if (!currentUids.has(uid)) {
+                                    scene.remove(otherPlayers[uid].group);
+                                    delete otherPlayers[uid];
+                                }
+                            }
+                        }, (error) => console.error("Sync error:", error));
+                    });
+                    
+                    // Best effort clean up on tab exit
+                    window.addEventListener('beforeunload', () => {
+                        if (userId && playerDocRef) {
+                            deleteDoc(playerDocRef).catch(e => console.error(e));
+                        }
+                    });
+                } catch (e) {
+                    console.error("Multiplayer init failed", e);
+                }
+            }
+
+            // Save Progress Function
+            async function saveProgress() {
+                if (!isOnline || !saveDocRef) return;
+                try {
+                    await setDoc(saveDocRef, {
+                        stageIndex: player.stageIndex,
+                        xp: player.xp,
+                        score: score,
+                        lastSaved: Date.now()
+                    }, { merge: true });
+                    
+                    const indicator = document.getElementById('save-indicator');
+                    indicator.style.opacity = 1;
+                    setTimeout(() => indicator.style.opacity = 0, 2000);
+                } catch (e) {
+                    console.error("Failed to save progress:", e);
+                }
+            }
+
+            // Auto-save every 30 seconds
+            setInterval(saveProgress, 30000);
+
+            // Bind UI Buttons
+            document.getElementById('save-btn').addEventListener('click', saveProgress);
+            
+            document.getElementById('reset-btn').addEventListener('click', async () => {
+                if (confirm("Are you sure you want to reset your evolution to a Baby Duck? This cannot be undone!")) {
+                    player.stageIndex = 0;
+                    player.xp = 0;
+                    score = 0;
+                    loadPlayerModel(0);
+                    updateUI();
+                    player.group.position.set(0, 0, 0); // Reset position to center
+                    await saveProgress();
+                }
+            });
+
+            function createOtherPlayer(uid, stageIndex, x, z, rot) {
+                const pGroup = new THREE.Group();
+                const pModelGroup = new THREE.Group();
+                pGroup.add(pModelGroup);
+                pGroup.position.set(x, 0, z);
+                pGroup.rotation.y = rot;
+
+                const stage = EVOLUTIONS[stageIndex];
+                pGroup.userData.wings = buildStageModel(stageIndex, pModelGroup, stage.size, stage.colors);
+
+                scene.add(pGroup);
+
+                otherPlayers[uid] = {
+                    group: pGroup,
+                    modelGroup: pModelGroup,
+                    stageIndex: stageIndex,
+                    targetX: x,
+                    targetZ: z,
+                    targetRot: rot,
+                    wobble: 0
+                };
+            }
+
+            // Resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // Keyboard Events
+            let secretBuffer = "";
+            window.addEventListener('keydown', (e) => { 
+                if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; 
+                if (keys.hasOwnProperty(e.key)) keys[e.key] = true; 
+                
+                // Secret Code Tracker (Hacks the game into Level 26)
+                if (e.key >= '0' && e.key <= '9') {
+                    secretBuffer += e.key;
+                    if (secretBuffer.length > 6) secretBuffer = secretBuffer.substring(secretBuffer.length - 6);
+                    
+                    // Trigger secret if they type 999999 while playing as The Developer (Index 24)
+                    if (secretBuffer === "999999" && player.stageIndex === 24) {
+                        player.stageIndex = 25; // Index 25 is Omega Glitch Duck
+                        loadPlayerModel(player.stageIndex);
+                        createExplosion(player.group.position, 0xff00ff, 200);
+                        
+                        const newStage = EVOLUTIONS[player.stageIndex];
+                        levelUpEmoji.innerText = newStage.emoji;
+                        levelUpName.innerText = "SECRET: " + newStage.name;
+                        levelUpNotification.style.opacity = '1';
+                        levelUpContent.style.transform = 'scale(1.1)';
+                        
+                        setTimeout(() => levelUpContent.style.transform = 'scale(1)', 100);
+                        setTimeout(() => levelUpNotification.style.opacity = '0', 5000);
+                        
+                        // Need to update the Firebase doc to sync the massive model change to other players
+                        if (typeof saveProgress === "function") saveProgress();
+                        updateUI();
+                    }
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => { if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; if (keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+
+            // Prevent right-click context menu
+            window.addEventListener('contextmenu', e => e.preventDefault());
+
+            function updateMousePos(clientX, clientY) {
+                mouse.x = (clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+            }
+            
+            window.addEventListener('mousedown', (e) => {
+                if (e.button === 0) isLeftMouseDown = true;
+                if (e.button === 2) {
+                    isRightMouseDown = true;
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                }
+            });
+            
+            window.addEventListener('mouseup', (e) => {
+                if (e.button === 0) isLeftMouseDown = false;
+                if (e.button === 2) isRightMouseDown = false;
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                updateMousePos(e.clientX, e.clientY);
+                if (isRightMouseDown) {
+                    const deltaX = e.clientX - lastMouseX;
+                    cameraAngleOffset -= deltaX * 0.005; // Orbit sensitivity
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                }
+            });
+            
+            window.addEventListener('touchstart', (e) => {
+                updateMousePos(e.touches[0].clientX, e.touches[0].clientY);
+                isLeftMouseDown = true;
+            }, {passive: false});
+            window.addEventListener('touchmove', (e) => {
+                updateMousePos(e.touches[0].clientX, e.touches[0].clientY);
+            }, {passive: false});
+            window.addEventListener('touchend', () => isLeftMouseDown = false);
+
+            // Zoom handling
+            window.addEventListener('wheel', (e) => {
+                cameraZoom += e.deltaY * 0.0015;
+                cameraZoom = Math.max(0.3, Math.min(cameraZoom, 4.0)); // Limits zoom from 0.3x to 4x
+            }, {passive: true});
+
+            // Factory: Build Custom Evolution Models
+            function buildStageModel(stageIndex, container, bSize, colors) {
+                const bodyMat = new THREE.MeshLambertMaterial({ color: colors.body });
+                const headMat = new THREE.MeshLambertMaterial({ color: colors.head });
+                const beakMat = new THREE.MeshLambertMaterial({ color: colors.beak });
+                const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+                const wings = [];
+
+                // Helper: Flapping Wing Pivot
+                function createWing(x, sizeX, sizeY, sizeZ, mat) {
+                    const pivot = new THREE.Group();
+                    pivot.position.set(x, bSize * 1.1, 0);
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sizeX, sizeY, sizeZ), mat);
+                    mesh.position.set(x > 0 ? sizeX/2 : -sizeX/2, 0, 0);
+                    pivot.add(mesh);
+                    container.add(pivot);
+                    return pivot;
+                }
+
+                // Helper: Eyes
+                function addEye(x, y, z, r) {
+                    const eye = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 8), eyeMat);
+                    eye.position.set(x, y, z);
+                    container.add(eye);
+                }
+
+                if (stageIndex === 0) { // Baby Duck
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), bodyMat);
+                    body.scale.set(1, 0.9, 1.1);
+                    body.position.y = bSize;
+                    container.add(body);
+
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.7, 16, 16), headMat);
+                    head.position.set(0, bSize*1.6, bSize*0.5);
+                    container.add(head);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize*0.6, 8), beakMat);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, bSize*1.55, bSize*1.1);
+                    container.add(beak);
+
+                    addEye(bSize*0.3, bSize*1.75, bSize*0.95, bSize*0.1);
+                    addEye(-bSize*0.3, bSize*1.75, bSize*0.95, bSize*0.1);
+
+                    wings.push(createWing(bSize*0.9, bSize*0.2, bSize*0.6, bSize*1.0, bodyMat));
+                    wings.push(createWing(-bSize*0.9, bSize*0.2, bSize*0.6, bSize*1.0, bodyMat));
+
+                } else if (stageIndex === 1) { // Normal Duck
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), bodyMat);
+                    body.scale.set(0.9, 0.8, 1.3);
+                    body.position.y = bSize * 0.9;
+                    container.add(body);
+
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize, 8), bodyMat);
+                    tail.rotation.x = -Math.PI / 2 + 0.3;
+                    tail.position.set(0, bSize*1.1, -bSize*1.1);
+                    container.add(tail);
+
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.6, 16, 16), headMat);
+                    head.position.set(0, bSize*1.8, bSize*0.7);
+                    container.add(head);
+
+                    // Flat beak
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.4, bSize*0.15, bSize*0.8), beakMat);
+                    beak.position.set(0, bSize*1.7, bSize*1.2);
+                    container.add(beak);
+
+                    addEye(bSize*0.25, bSize*1.85, bSize*1.1, bSize*0.08);
+                    addEye(-bSize*0.25, bSize*1.85, bSize*1.1, bSize*0.08);
+
+                    wings.push(createWing(bSize*0.8, bSize*0.2, bSize*0.6, bSize*1.4, bodyMat));
+                    wings.push(createWing(-bSize*0.8, bSize*0.2, bSize*0.6, bSize*1.4, bodyMat));
+
+                } else if (stageIndex === 2) { // Wild Goose
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), bodyMat);
+                    body.scale.set(0.8, 0.8, 1.4);
+                    body.position.y = bSize * 0.9;
+                    container.add(body);
+
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.5, bSize*1.2, 8), bodyMat);
+                    tail.rotation.x = -Math.PI / 2 + 0.2;
+                    tail.position.set(0, bSize*1.1, -bSize*1.3);
+                    container.add(tail);
+
+                    const neck = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.3, bSize*0.4, bSize*1.5, 16), headMat);
+                    neck.rotation.x = Math.PI / 6;
+                    neck.position.set(0, bSize*1.6, bSize*0.8);
+                    container.add(neck);
+
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.5, 16, 16), headMat);
+                    head.position.set(0, bSize*2.2, bSize*1.1);
+                    container.add(head);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize, 8), beakMat);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, bSize*2.1, bSize*1.6);
+                    container.add(beak);
+
+                    addEye(bSize*0.25, bSize*2.25, bSize*1.3, bSize*0.08);
+                    addEye(-bSize*0.25, bSize*2.25, bSize*1.3, bSize*0.08);
+
+                    wings.push(createWing(bSize*0.7, bSize*0.2, bSize*0.6, bSize*1.8, bodyMat));
+                    wings.push(createWing(-bSize*0.7, bSize*0.2, bSize*0.6, bSize*1.8, bodyMat));
+
+                } else if (stageIndex === 3) { // Swan
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), bodyMat);
+                    body.scale.set(0.8, 0.7, 1.5);
+                    body.position.y = bSize;
+                    container.add(body);
+
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.6, bSize*1.5, 16), bodyMat);
+                    tail.rotation.x = -Math.PI / 2 + 0.4;
+                    tail.scale.set(1, 0.5, 1);
+                    tail.position.set(0, bSize*1.3, -bSize*1.4);
+                    container.add(tail);
+
+                    // S-Curve Neck
+                    const numNeckParts = 8;
+                    for(let i=0; i<numNeckParts; i++) {
+                        const t = i / (numNeckParts - 1);
+                        const ny = bSize + t * bSize * 1.8;
+                        const nz = bSize*0.8 + Math.sin(t * Math.PI * 1.5) * bSize * 0.4;
+                        const nSize = bSize*0.3 * (1 - t*0.3);
+                        const neckPart = new THREE.Mesh(new THREE.SphereGeometry(nSize, 16, 16), headMat);
+                        neckPart.position.set(0, ny, nz);
+                        container.add(neckPart);
+                    }
+
+                    const hY = bSize + bSize * 1.8;
+                    const hZ = bSize*0.8 + Math.sin(Math.PI * 1.5) * bSize * 0.4 + bSize*0.2;
+                    
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.4, 16, 16), headMat);
+                    head.position.set(0, hY, hZ);
+                    container.add(head);
+
+                    const mask = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.4, bSize*0.2, bSize*0.3), eyeMat);
+                    mask.position.set(0, hY, hZ + bSize*0.3);
+                    container.add(mask);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.2, bSize*0.8, 8), beakMat);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, hY - bSize*0.05, hZ + bSize*0.6);
+                    container.add(beak);
+
+                    addEye(bSize*0.2, hY + bSize*0.1, hZ + bSize*0.2, bSize*0.06);
+                    addEye(-bSize*0.2, hY + bSize*0.1, hZ + bSize*0.2, bSize*0.06);
+
+                    wings.push(createWing(bSize*0.7, bSize*0.15, bSize*1.0, bSize*2.0, bodyMat));
+                    wings.push(createWing(-bSize*0.7, bSize*0.15, bSize*1.0, bSize*2.0, bodyMat));
+
+                } else if (stageIndex === 4) { // Prehistoric Quack (Dino Duck)
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), bodyMat);
+                    body.scale.set(0.9, 0.9, 1.4);
+                    body.position.y = bSize * 1.1;
+                    container.add(body);
+
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.6, bSize*1.8, 8), bodyMat);
+                    tail.rotation.x = -Math.PI / 2 + 0.2;
+                    tail.position.set(0, bSize*1.2, -bSize*1.5);
+                    container.add(tail);
+
+                    // Dino Spikes
+                    for(let i=0; i<5; i++) {
+                        const spike = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.2, bSize*0.6, 4), beakMat);
+                        spike.position.set(0, bSize*2.0 - (i*bSize*0.15), bSize*0.5 - (i*bSize*0.5));
+                        spike.rotation.x = -0.2;
+                        container.add(spike);
+                    }
+
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.8, bSize*0.8, bSize*0.9), headMat);
+                    head.position.set(0, bSize*2.2, bSize*0.9);
+                    container.add(head);
+
+                    // Heavy jaw
+                    const jaw = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.3, bSize*0.8), beakMat);
+                    jaw.position.set(0, bSize*1.9, bSize*1.4);
+                    container.add(jaw);
+                    const upperJaw = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.2, bSize*0.8), beakMat);
+                    upperJaw.position.set(0, bSize*2.1, bSize*1.4);
+                    container.add(upperJaw);
+
+                    addEye(bSize*0.42, bSize*2.3, bSize*1.0, bSize*0.08);
+                    addEye(-bSize*0.42, bSize*2.3, bSize*1.0, bSize*0.08);
+
+                    wings.push(createWing(bSize*0.8, bSize*0.2, bSize*0.8, bSize*1.5, bodyMat));
+                    wings.push(createWing(-bSize*0.8, bSize*0.2, bSize*0.8, bSize*1.5, bodyMat));
+
+                } else if (stageIndex === 5) { // Mecha Mallard (Robot)
+                    const body = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.8, bSize*0.9, bSize*1.8, 8), bodyMat);
+                    body.rotation.x = Math.PI / 2;
+                    body.position.set(0, bSize * 1.2, 0);
+                    container.add(body);
+
+                    const tailThruster = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.4, bSize*0.6, bSize*0.8, 8), headMat);
+                    tailThruster.rotation.x = Math.PI / 2;
+                    tailThruster.position.set(0, bSize*1.2, -bSize*1.1);
+                    container.add(tailThruster);
+
+                    const neck = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.3, bSize*0.3, bSize*0.8, 8), beakMat);
+                    neck.rotation.x = Math.PI / 6;
+                    neck.position.set(0, bSize*1.8, bSize*0.8);
+                    container.add(neck);
+
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.9, bSize*0.7, bSize*0.9), bodyMat);
+                    head.position.set(0, bSize*2.3, bSize*1.1);
+                    container.add(head);
+
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.5, bSize*0.2, bSize*0.8), beakMat);
+                    beak.position.set(0, bSize*2.2, bSize*1.6);
+                    container.add(beak);
+
+                    const glowEyeMat = new THREE.MeshBasicMaterial({color: 0x06b6d4}); // Cyan
+                    const eyeL = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.2, bSize*0.1, bSize*0.1), glowEyeMat);
+                    eyeL.position.set(bSize*0.25, bSize*2.4, bSize*1.55);
+                    const eyeR = eyeL.clone();
+                    eyeR.position.set(-bSize*0.25, bSize*2.4, bSize*1.55);
+                    container.add(eyeL, eyeR);
+
+                    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.05, bSize*0.05, bSize*0.6), beakMat);
+                    antenna.position.set(0, bSize*2.8, bSize*1.0);
+                    const bulb = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.15, 8, 8), glowEyeMat);
+                    bulb.position.set(0, bSize*3.1, bSize*1.0);
+                    container.add(antenna, bulb);
+
+                    wings.push(createWing(bSize*0.9, bSize*0.3, bSize*0.2, bSize*1.6, headMat));
+                    wings.push(createWing(-bSize*0.9, bSize*0.3, bSize*0.2, bSize*1.6, headMat));
+
+                } else if (stageIndex === 6) { // Cosmic Dragon
+                    // Serpentine body
+                    const numBodyParts = 6;
+                    for(let i=0; i<numBodyParts; i++) {
+                        const zPos = -i * bSize * 0.8;
+                        const scale = 1 - (i * 0.1);
+                        const bPart = new THREE.Mesh(new THREE.SphereGeometry(bSize * scale, 16, 16), bodyMat);
+                        bPart.scale.set(1, 0.8, 1.2);
+                        bPart.position.set(0, bSize, zPos);
+                        
+                        const spike = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.2*scale, bSize*0.6*scale, 4), beakMat);
+                        spike.position.set(0, bSize*1.5*scale, zPos);
+                        container.add(bPart, spike);
+                    }
+
+                    const neck = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.4, bSize*0.6, bSize*1.5, 16), bodyMat);
+                    neck.rotation.x = Math.PI / 4;
+                    neck.position.set(0, bSize*1.6, bSize*0.6);
+                    container.add(neck);
+
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.8, bSize*0.6, bSize*1.2), headMat);
+                    head.position.set(0, bSize*2.0, bSize*1.2);
+                    container.add(head);
+
+                    const snout = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.4, bSize*0.8), headMat);
+                    snout.position.set(0, bSize*1.9, bSize*2.0);
+                    container.add(snout);
+                    
+                    const hornMat = new THREE.MeshLambertMaterial({color: 0xffffff});
+                    const hornL = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.15, bSize*1.2, 8), hornMat);
+                    hornL.rotation.x = -Math.PI / 4;
+                    hornL.rotation.z = -Math.PI / 8;
+                    hornL.position.set(bSize*0.4, bSize*2.6, bSize*0.8);
+                    container.add(hornL);
+
+                    const hornR = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.15, bSize*1.2, 8), hornMat);
+                    hornR.rotation.x = -Math.PI / 4;
+                    hornR.rotation.z = Math.PI / 8;
+                    hornR.position.set(-bSize*0.4, bSize*2.6, bSize*0.8);
+                    container.add(hornR);
+
+                    const glowEyeMat = new THREE.MeshBasicMaterial({color: 0x3b82f6});
+                    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.15, 8, 8), glowEyeMat);
+                    eyeL.position.set(bSize*0.4, bSize*2.1, bSize*1.6);
+                    const eyeR = eyeL.clone();
+                    eyeR.position.set(-bSize*0.4, bSize*2.1, bSize*1.6);
+                    container.add(eyeL, eyeR);
+
+                    // Dragon Wings
+                    function createDragonWing(x) {
+                        const pivot = new THREE.Group();
+                        pivot.position.set(x, bSize*1.5, 0);
+                        
+                        const wingShape = new THREE.Shape();
+                        wingShape.moveTo(0, 0);
+                        wingShape.lineTo(bSize*2, bSize*1.5);
+                        wingShape.lineTo(bSize*2.5, bSize*0.5);
+                        wingShape.lineTo(bSize*1.5, -bSize*1.0);
+                        wingShape.lineTo(0, 0);
+                        
+                        const extrudeSettings = { depth: bSize*0.1, bevelEnabled: false };
+                        const geometry = new THREE.ExtrudeGeometry(wingShape, extrudeSettings);
+                        geometry.translate(0, 0, -bSize*0.05);
+
+                        const mesh = new THREE.Mesh(geometry, bodyMat);
+                        if(x < 0) mesh.scale.set(-1, 1, 1);
+                        
+                        pivot.add(mesh);
+                        container.add(pivot);
+                        return pivot;
+                    }
+
+                    wings.push(createDragonWing(bSize*0.4));
+                    wings.push(createDragonWing(-bSize*0.4));
+
+                } else if (stageIndex === 7) { // Galactic Emperor
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), bodyMat);
+                    body.scale.set(0.9, 1.1, 1.3);
+                    body.position.y = bSize * 1.2;
+                    container.add(body);
+
+                    // Cape
+                    const capeMat = new THREE.MeshLambertMaterial({ color: 0x7e22ce }); // Purple
+                    const cape = new THREE.Mesh(new THREE.BoxGeometry(bSize*1.5, bSize*2, bSize*0.1), capeMat);
+                    cape.position.set(0, bSize*1.5, -bSize*1.2);
+                    cape.rotation.x = -0.3;
+                    container.add(cape);
+
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.7, 16, 16), headMat);
+                    head.position.set(0, bSize*2.4, bSize*0.6);
+                    container.add(head);
+
+                    // Crown
+                    const crownMat = new THREE.MeshLambertMaterial({ color: 0xfacc15 });
+                    const crown = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.4, bSize*0.4, bSize*0.5, 8), crownMat);
+                    crown.position.set(0, bSize*3.0, bSize*0.6);
+                    container.add(crown);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize*0.8, 8), beakMat);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, bSize*2.3, bSize*1.2);
+                    container.add(beak);
+
+                    addEye(bSize*0.3, bSize*2.5, bSize*1.1, bSize*0.1);
+                    addEye(-bSize*0.3, bSize*2.5, bSize*1.1, bSize*0.1);
+
+                    wings.push(createWing(bSize*0.9, bSize*0.3, bSize*0.8, bSize*1.6, bodyMat));
+                    wings.push(createWing(-bSize*0.9, bSize*0.3, bSize*0.8, bSize*1.6, bodyMat));
+
+                } else if (stageIndex === 8) { // Quantum Duck
+                    const qMat = new THREE.MeshLambertMaterial({ color: colors.body, transparent: true, opacity: 0.7 });
+                    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+                    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(bSize, 0), qMat);
+                    body.position.y = bSize * 1.2;
+                    const bodyCore = new THREE.Mesh(new THREE.IcosahedronGeometry(bSize*0.5, 0), coreMat);
+                    body.add(bodyCore);
+                    container.add(body);
+
+                    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(bSize*0.7, 0), qMat);
+                    head.position.set(0, bSize*2.4, bSize*0.6);
+                    container.add(head);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize*1.0, 3), beakMat);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, bSize*2.3, bSize*1.2);
+                    container.add(beak);
+
+                    // Floating quantum orbs instead of wings
+                    wings.push(createWing(bSize*1.2, bSize*0.5, bSize*0.5, bSize*0.5, qMat));
+                    wings.push(createWing(-bSize*1.2, bSize*0.5, bSize*0.5, bSize*0.5, qMat));
+
+                } else if (stageIndex === 9) { // Multiverse Creator
+                    const godMat = new THREE.MeshLambertMaterial({ color: colors.body, emissive: 0x442200 });
+                    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 32, 32), godMat);
+                    body.position.y = bSize * 1.5;
+                    container.add(body);
+
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.8, 32, 32), godMat);
+                    head.position.set(0, bSize*3.0, bSize*0.8);
+                    container.add(head);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize*1.2, 16), beakMat);
+                    beak.rotation.x = Math.PI / 2;
+                    beak.position.set(0, bSize*2.9, bSize*1.8);
+                    container.add(beak);
+
+                    addEye(bSize*0.35, bSize*3.2, bSize*1.4, bSize*0.15);
+                    addEye(-bSize*0.35, bSize*3.2, bSize*1.4, bSize*0.15);
+
+                    // Celestial rings
+                    const r1 = new THREE.Mesh(new THREE.TorusGeometry(bSize*2.5, bSize*0.05, 16, 100), ringMat);
+                    r1.rotation.x = Math.PI / 2;
+                    r1.position.y = bSize*1.5;
+                    const r2 = new THREE.Mesh(new THREE.TorusGeometry(bSize*2.0, bSize*0.05, 16, 100), ringMat);
+                    r2.rotation.x = Math.PI / 4;
+                    r2.position.y = bSize*1.5;
+                    const r3 = new THREE.Mesh(new THREE.TorusGeometry(bSize*2.0, bSize*0.05, 16, 100), ringMat);
+                    r3.rotation.x = -Math.PI / 4;
+                    r3.position.y = bSize*1.5;
+                    
+                    container.add(r1, r2, r3);
+                    container.userData.spinners = [r1, r2, r3];
+
+                    wings.push(createWing(bSize*1.2, bSize*0.4, bSize*1.5, bSize*2.5, godMat));
+                    wings.push(createWing(-bSize*1.2, bSize*0.4, bSize*1.5, bSize*2.5, godMat));
+
+                } else if (stageIndex === 10) { // Chrono Duck
+                    const body = new THREE.Mesh(new THREE.CylinderGeometry(bSize, bSize, bSize*1.5, 16), bodyMat);
+                    body.rotation.z = Math.PI/2;
+                    body.position.y = bSize*1.2;
+                    container.add(body);
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.7, 16, 16), headMat);
+                    head.position.set(0, bSize*2.5, bSize*0.8);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.4, bSize*0.2, bSize*0.8), beakMat);
+                    beak.position.set(0, bSize*2.4, bSize*1.4);
+                    container.add(beak);
+                    wings.push(createWing(bSize, bSize*0.2, bSize*1.5, bSize*1.5, bodyMat));
+                    wings.push(createWing(-bSize, bSize*0.2, bSize*1.5, bSize*1.5, bodyMat));
+
+                } else if (stageIndex === 11) { // Celestial Phoenix
+                    const mat = new THREE.MeshLambertMaterial({color: colors.body, emissive: 0xb91c1c});
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 16, 16), mat);
+                    body.scale.set(0.8, 0.9, 1.4);
+                    body.position.y = bSize*1.2;
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.6, bSize*2, 8), mat);
+                    tail.rotation.x = -Math.PI/2 + 0.3;
+                    tail.position.set(0, bSize*1.4, -bSize*1.5);
+                    container.add(body, tail);
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.6, 16, 16), new THREE.MeshLambertMaterial({color: colors.head}));
+                    head.position.set(0, bSize*2.4, bSize*1.0);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize, 8), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*2.3, bSize*1.5);
+                    container.add(head, beak);
+                    wings.push(createWing(bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, mat));
+                    wings.push(createWing(-bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, mat));
+
+                } else if (stageIndex === 12) { // Void Glitch
+                    const glitchMat1 = new THREE.MeshBasicMaterial({color: 0x000000});
+                    const glitchMat2 = new THREE.MeshBasicMaterial({color: 0x10b981, wireframe: true});
+                    for(let i=0; i<8; i++) {
+                        const box = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.6, bSize*0.6), i%2==0 ? glitchMat1 : glitchMat2);
+                        box.position.set((Math.random()-0.5)*bSize, bSize*1.5 + (Math.random()-0.5)*bSize, (Math.random()-0.5)*bSize);
+                        container.add(box);
+                    }
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.8, bSize*0.8, bSize*0.8), glitchMat2);
+                    head.position.set(0, bSize*2.5, bSize*0.8);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.4, bSize*0.2, bSize*0.8), glitchMat1);
+                    beak.position.set(0, bSize*2.3, bSize*1.5);
+                    container.add(beak);
+                    wings.push(createWing(bSize*0.8, bSize*0.4, bSize*0.4, bSize*1.5, glitchMat2));
+                    wings.push(createWing(-bSize*0.8, bSize*0.4, bSize*0.4, bSize*1.5, glitchMat2));
+
+                } else if (stageIndex === 13) { // Neon Seraphim
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 32, 32), bodyMat);
+                    body.position.y = bSize*1.5;
+                    container.add(body);
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.6, 32, 32), headMat);
+                    head.position.set(0, bSize*2.8, bSize*0.8);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize*0.8, 16), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*2.7, bSize*1.4);
+                    container.add(beak);
+                    const halo = new THREE.Mesh(new THREE.TorusGeometry(bSize*0.5, bSize*0.05, 8, 32), new THREE.MeshBasicMaterial({color: 0xfef08a}));
+                    halo.rotation.x = Math.PI/2;
+                    halo.position.set(0, bSize*3.6, bSize*0.8);
+                    container.add(halo);
+                    // 6 Wings!
+                    wings.push(createWing(bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, bodyMat));
+                    wings.push(createWing(-bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, bodyMat));
+                    const w3 = createWing(bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, bodyMat); w3.position.y += bSize*0.5; w3.rotation.x = 0.5; wings.push(w3);
+                    const w4 = createWing(-bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, bodyMat); w4.position.y += bSize*0.5; w4.rotation.x = 0.5; wings.push(w4);
+                    const w5 = createWing(bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, bodyMat); w5.position.y -= bSize*0.5; w5.rotation.x = -0.5; wings.push(w5);
+                    const w6 = createWing(-bSize*0.8, bSize*0.1, bSize*1.5, bSize*2.5, bodyMat); w6.position.y -= bSize*0.5; w6.rotation.x = -0.5; wings.push(w6);
+
+                } else if (stageIndex === 14) { // Crystal Leviathan
+                    const cryMat = new THREE.MeshLambertMaterial({color: colors.body, emissive: 0x0891b2, transparent: true, opacity: 0.9});
+                    const body = new THREE.Mesh(new THREE.IcosahedronGeometry(bSize, 0), cryMat);
+                    body.scale.set(0.8, 1, 1.5);
+                    body.position.y = bSize*1.2;
+                    container.add(body);
+                    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(bSize*0.6, 0), cryMat);
+                    head.position.set(0, bSize*2.6, bSize*1.2);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize*1.2, 4), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*2.5, bSize*2.0);
+                    container.add(beak);
+                    wings.push(createWing(bSize*0.6, bSize*0.2, bSize*1.5, bSize*2.0, cryMat));
+                    wings.push(createWing(-bSize*0.6, bSize*0.2, bSize*1.5, bSize*2.0, cryMat));
+
+                } else if (stageIndex === 15) { // Hyper-Prism
+                    const hypMat = new THREE.MeshLambertMaterial({color: colors.body, wireframe: true});
+                    const coreMat = new THREE.MeshLambertMaterial({color: colors.head});
+                    const body = new THREE.Mesh(new THREE.OctahedronGeometry(bSize*1.5, 0), hypMat);
+                    body.position.y = bSize*1.5;
+                    const core = new THREE.Mesh(new THREE.OctahedronGeometry(bSize*0.8, 0), coreMat);
+                    body.add(core);
+                    container.add(body);
+                    container.userData.spinners = [body];
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize, 4), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*1.5, bSize*1.8);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.2, bSize*0.1, bSize*1.0, bSize*1.0, coreMat));
+                    wings.push(createWing(-bSize*1.2, bSize*0.1, bSize*1.0, bSize*1.0, coreMat));
+
+                } else if (stageIndex === 16) { // Stellar Devourer
+                    const voidMat = new THREE.MeshBasicMaterial({color: 0x000000});
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 32, 32), voidMat);
+                    body.position.y = bSize*1.5;
+                    const disk = new THREE.Mesh(new THREE.RingGeometry(bSize*1.2, bSize*2.5, 64), new THREE.MeshBasicMaterial({color: 0xfacc15, side: THREE.DoubleSide}));
+                    disk.rotation.x = Math.PI/2 - 0.2;
+                    body.add(disk);
+                    container.add(body);
+                    container.userData.spinners = [disk];
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.6, 32, 32), voidMat);
+                    head.position.set(0, bSize*3.0, bSize*1.0);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize*1.0, 16), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*2.8, bSize*1.8);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.2, bSize*0.2, bSize*1.0, bSize*2.0, new THREE.MeshBasicMaterial({color: 0x1e293b})));
+                    wings.push(createWing(-bSize*1.2, bSize*0.2, bSize*1.0, bSize*2.0, new THREE.MeshBasicMaterial({color: 0x1e293b})));
+
+                } else if (stageIndex === 17) { // Concept of Quack
+                    const brainMat = new THREE.MeshLambertMaterial({color: colors.body, emissive: 0x8b5cf6});
+                    const body = new THREE.Mesh(new THREE.DodecahedronGeometry(bSize, 1), brainMat);
+                    body.position.y = bSize*1.8;
+                    container.add(body);
+                    container.userData.spinners = [body];
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.2, bSize*1.0), beakMat);
+                    beak.position.set(0, bSize*1.5, bSize*1.5);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.2, bSize*0.2, bSize*0.8, bSize*1.5, headMat));
+                    wings.push(createWing(-bSize*1.2, bSize*0.2, bSize*0.8, bSize*1.5, headMat));
+
+                } else if (stageIndex === 18) { // Omniversal Overlord
+                    const coreMat = new THREE.MeshBasicMaterial({color: 0xffffff});
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 32, 32), coreMat);
+                    body.position.y = bSize*2.0;
+                    container.add(body);
+                    const sysGroup = new THREE.Group();
+                    for(let i=0; i<8; i++) {
+                        const p = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.2, 16, 16), new THREE.MeshBasicMaterial({color: Math.random() * 0xffffff}));
+                        const angle = (i/8)*Math.PI*2;
+                        p.position.set(Math.cos(angle)*bSize*1.8, 0, Math.sin(angle)*bSize*1.8);
+                        sysGroup.add(p);
+                    }
+                    body.add(sysGroup);
+                    container.userData.spinners = [sysGroup];
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize*1.5, 32), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*2.0, bSize*1.8);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.5, bSize*0.2, bSize*1.0, bSize*2.5, new THREE.MeshBasicMaterial({color: 0x000000})));
+                    wings.push(createWing(-bSize*1.5, bSize*0.2, bSize*1.0, bSize*2.5, new THREE.MeshBasicMaterial({color: 0x000000})));
+
+                } else if (stageIndex === 19) { // The Architect
+                    const wireMat = new THREE.MeshBasicMaterial({color: 0x00ff00, wireframe: true});
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(bSize*1.5, bSize*1.5, bSize*2.0), wireMat);
+                    body.position.y = bSize*1.5;
+                    container.add(body);
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(bSize*1.0, bSize*1.0, bSize*1.0), wireMat);
+                    head.position.set(0, bSize*3.0, bSize*1.0);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.3, bSize*1.2), wireMat);
+                    beak.position.set(0, bSize*2.8, bSize*2.0);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.0, bSize*0.4, bSize*1.2, bSize*2.0, wireMat));
+                    wings.push(createWing(-bSize*1.0, bSize*0.4, bSize*1.2, bSize*2.0, wireMat));
+                } else if (stageIndex === 20) { // Tesseract Duck
+                    const tMat = new THREE.MeshBasicMaterial({color: 0x8b5cf6, wireframe: true});
+                    const coreMat = new THREE.MeshLambertMaterial({color: colors.body, transparent: true, opacity: 0.8});
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(bSize*1.5, bSize*1.5, bSize*1.5), coreMat);
+                    const outBody = new THREE.Mesh(new THREE.BoxGeometry(bSize*2, bSize*2, bSize*2), tMat);
+                    body.add(outBody);
+                    body.position.y = bSize*1.5;
+                    container.add(body);
+                    container.userData.spinners = [body, outBody];
+                    const head = new THREE.Mesh(new THREE.BoxGeometry(bSize, bSize, bSize), coreMat);
+                    head.position.set(0, bSize*3.0, bSize*1.0);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.5, bSize*0.2, bSize*0.8), beakMat);
+                    beak.position.set(0, bSize*2.8, bSize*1.8);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.2, bSize*0.4, bSize*1.2, bSize*2.0, tMat));
+                    wings.push(createWing(-bSize*1.2, bSize*0.4, bSize*1.2, bSize*2.0, tMat));
+                } else if (stageIndex === 21) { // Yggdrasil Mallard
+                    const woodMat = new THREE.MeshLambertMaterial({color: 0x78350f});
+                    const leafMat = new THREE.MeshLambertMaterial({color: 0x15803d});
+                    const body = new THREE.Mesh(new THREE.CylinderGeometry(bSize*0.8, bSize, bSize*2.5, 8), woodMat);
+                    body.rotation.x = Math.PI/2;
+                    body.position.y = bSize*1.2;
+                    container.add(body);
+                    const head = new THREE.Mesh(new THREE.DodecahedronGeometry(bSize*1.2, 1), leafMat);
+                    head.position.set(0, bSize*3.5, bSize*1.0);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize*1.2, 8), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*3.2, bSize*2.5);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.2, bSize*0.2, bSize*1.5, bSize*2.5, leafMat));
+                    wings.push(createWing(-bSize*1.2, bSize*0.2, bSize*1.5, bSize*2.5, leafMat));
+                } else if (stageIndex === 22) { // Supermassive Quacksar
+                    const holeMat = new THREE.MeshBasicMaterial({color: 0x000000});
+                    const accMat = new THREE.MeshBasicMaterial({color: 0xf97316, side: THREE.DoubleSide});
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize, 32, 32), holeMat);
+                    body.position.y = bSize*1.5;
+                    const ring = new THREE.Mesh(new THREE.RingGeometry(bSize*1.5, bSize*3.0, 64), accMat);
+                    ring.rotation.x = Math.PI/2 - 0.2;
+                    body.add(ring);
+                    container.add(body);
+                    container.userData.spinners = [ring];
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.6, 32, 32), holeMat);
+                    head.position.set(0, bSize*3.0, bSize*1.0);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.3, bSize*1.0, 16), beakMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*2.8, bSize*1.8);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.5, bSize*0.1, bSize*1.5, bSize*2.5, accMat));
+                    wings.push(createWing(-bSize*1.5, bSize*0.1, bSize*1.5, bSize*2.5, accMat));
+                } else if (stageIndex === 23) { // The Simulation
+                    const gridMat = new THREE.MeshBasicMaterial({color: 0x22d3ee, wireframe: true});
+                    const body = new THREE.Mesh(new THREE.SphereGeometry(bSize*1.5, 16, 16), gridMat);
+                    body.position.y = bSize*1.5;
+                    container.add(body);
+                    const head = new THREE.Mesh(new THREE.SphereGeometry(bSize*0.8, 16, 16), gridMat);
+                    head.position.set(0, bSize*3.5, bSize*1.0);
+                    container.add(head);
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.4, bSize*1.2, 8), gridMat);
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*3.2, bSize*2.2);
+                    container.add(beak);
+                    wings.push(createWing(bSize*1.5, bSize*0.2, bSize*1.5, bSize*2.5, gridMat));
+                    wings.push(createWing(-bSize*1.5, bSize*0.2, bSize*1.5, bSize*2.5, gridMat));
+                    container.userData.spinners = [body, head];
+                } else if (stageIndex === 24) { // The Developer
+                    const deskMat = new THREE.MeshLambertMaterial({color: 0x1e293b});
+                    const screenMat = new THREE.MeshBasicMaterial({color: 0xffffff});
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(bSize*1.5, bSize, bSize*2), deskMat);
+                    body.position.y = bSize*1.0;
+                    container.add(body);
+                    const monitor = new THREE.Mesh(new THREE.BoxGeometry(bSize*1.2, bSize*0.8, bSize*0.1), deskMat);
+                    monitor.position.set(0, bSize*2.5, bSize*0.5);
+                    const screen = new THREE.Mesh(new THREE.PlaneGeometry(bSize*1.0, bSize*0.6), screenMat);
+                    screen.position.set(0, 0, bSize*0.06);
+                    monitor.add(screen);
+                    container.add(monitor);
+                    const beak = new THREE.Mesh(new THREE.BoxGeometry(bSize*0.6, bSize*0.1, bSize*0.8), beakMat);
+                    beak.position.set(0, bSize*2.0, bSize*1.5);
+                    container.add(beak);
+                    // Keyboard wings
+                    const keyMat = new THREE.MeshLambertMaterial({color: 0x94a3b8});
+                    wings.push(createWing(bSize*1.0, bSize*0.8, bSize*0.1, bSize*1.5, keyMat));
+                    wings.push(createWing(-bSize*1.0, bSize*0.8, bSize*0.1, bSize*1.5, keyMat));
+                } else if (stageIndex === 25) { // SECRET: Omega Glitch Duck
+                    const glitchMat1 = new THREE.MeshBasicMaterial({color: 0xff00ff, wireframe: true});
+                    const glitchMat2 = new THREE.MeshBasicMaterial({color: 0x00ffff, wireframe: true});
+                    
+                    const body = new THREE.Group();
+                    for(let i=0; i<60; i++) {
+                        const box = new THREE.Mesh(new THREE.BoxGeometry(Math.random()*bSize, Math.random()*bSize, Math.random()*bSize), Math.random() > 0.5 ? glitchMat1 : glitchMat2);
+                        box.position.set((Math.random()-0.5)*bSize*1.5, (Math.random()-0.5)*bSize*1.5, (Math.random()-0.5)*bSize*1.5);
+                        body.add(box);
+                    }
+                    body.position.y = bSize*1.5;
+                    container.add(body);
+                    container.userData.spinners = [body]; // Make the whole glitch body spin erratically
+
+                    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(bSize*0.8, 0), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                    head.position.set(0, bSize*3.5, bSize*1.0);
+                    container.add(head);
+                    container.userData.spinners.push(head);
+
+                    const beak = new THREE.Mesh(new THREE.ConeGeometry(bSize*0.5, bSize*1.5, 4), new THREE.MeshBasicMaterial({color: 0x000000}));
+                    beak.rotation.x = Math.PI/2;
+                    beak.position.set(0, bSize*3.2, bSize*2.5);
+                    container.add(beak);
+
+                    wings.push(createWing(bSize*1.5, bSize*0.5, bSize*1.5, bSize*3.0, glitchMat1));
+                    wings.push(createWing(-bSize*1.5, bSize*0.5, bSize*1.5, bSize*3.0, glitchMat2));
+                }
+
+                // Enable shadows for the entire assembled model
+                container.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+
+                return wings;
+            }
+
+            function loadPlayerModel(stageIndex) {
+                if (player.modelGroup) {
+                    player.group.remove(player.modelGroup);
+                }
+                player.modelGroup = new THREE.Group();
+                player.group.add(player.modelGroup);
+                
+                const stage = EVOLUTIONS[stageIndex];
+                player.group.userData.wings = buildStageModel(stageIndex, player.modelGroup, stage.size, stage.colors);
+                updateUI();
+            }
+
+            // Factory: Build Custom Food Models
+            function createFoodMesh(type) {
+                const group = new THREE.Group();
+                const mat = new THREE.MeshLambertMaterial({ color: type.color });
+                
+                if (type.type === 'seed') {
+                    const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(type.size, 0), mat);
+                    group.add(mesh);
+                } else if (type.type === 'bread') {
+                    const mesh1 = new THREE.Mesh(new THREE.BoxGeometry(type.size, type.size*0.8, type.size*0.2), mat);
+                    const mesh2 = new THREE.Mesh(new THREE.CylinderGeometry(type.size*0.5, type.size*0.5, type.size*0.2, 16), mat);
+                    mesh2.rotation.x = Math.PI/2;
+                    mesh2.position.y = type.size*0.4;
+                    group.add(mesh1, mesh2);
+                } else if (type.type === 'bug') {
+                    const b1 = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.5, 8, 8), mat);
+                    const b2 = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.4, 8, 8), mat);
+                    b2.position.z = -type.size*0.7;
+                    const b3 = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.3, 8, 8), mat);
+                    b3.position.z = -type.size*1.2;
+                    group.add(b1, b2, b3);
+                } else if (type.type === 'fish') {
+                    const body = new THREE.Mesh(new THREE.ConeGeometry(type.size*0.5, type.size*2, 8), mat);
+                    body.rotation.x = Math.PI/2;
+                    const tailMat = new THREE.MeshLambertMaterial({ color: 0x60a5fa });
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(type.size*0.6, type.size*1.2, 4), tailMat);
+                    tail.position.z = -type.size;
+                    tail.rotation.x = -Math.PI/2;
+                    group.add(body, tail);
+                    
+                    const eyeMat = new THREE.MeshBasicMaterial({color: 0x000000});
+                    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.1, 4, 4), eyeMat);
+                    eyeL.position.set(type.size*0.3, type.size*0.2, type.size*0.5);
+                    const eyeR = eyeL.clone();
+                    eyeR.position.set(-type.size*0.3, type.size*0.2, type.size*0.5);
+                    group.add(eyeL, eyeR);
+                } else if (type.type === 'star') {
+                    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(type.size, 0), mat);
+                    const glowMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.5});
+                    const glow = new THREE.Mesh(new THREE.OctahedronGeometry(type.size*1.3, 0), glowMat);
+                    group.add(mesh, glow);
+                } else if (type.type === 'battery') {
+                    const body = new THREE.Mesh(new THREE.CylinderGeometry(type.size*0.4, type.size*0.4, type.size*1.2, 12), mat);
+                    body.rotation.x = Math.PI / 2;
+                    const nodeMat = new THREE.MeshLambertMaterial({color: 0xfacc15}); // Yellow tip
+                    const node = new THREE.Mesh(new THREE.CylinderGeometry(type.size*0.2, type.size*0.2, type.size*0.2, 12), nodeMat);
+                    node.rotation.x = Math.PI / 2;
+                    node.position.z = type.size*0.6;
+                    group.add(body, node);
+                } else if (type.type === 'galaxy_core') {
+                    const core = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.5, 16, 16), mat);
+                    const ringMat = new THREE.MeshBasicMaterial({color: 0x8b5cf6, transparent: true, opacity: 0.7, side: THREE.DoubleSide});
+                    const ring = new THREE.Mesh(new THREE.RingGeometry(type.size*0.7, type.size, 32), ringMat);
+                    ring.rotation.x = Math.PI / 3;
+                    group.add(core, ring);
+                } else if (type.type === 'golden_egg') {
+                    const mesh = new THREE.Mesh(new THREE.SphereGeometry(type.size, 16, 16), mat);
+                    mesh.scale.set(1, 1.3, 1);
+                    group.add(mesh);
+                } else if (type.type === 'quark') {
+                    const core = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.4, 8, 8), mat);
+                    const ringMat = new THREE.MeshBasicMaterial({ color: type.color, side: THREE.DoubleSide, wireframe: true });
+                    const r1 = new THREE.Mesh(new THREE.TorusGeometry(type.size, type.size*0.1, 8, 16), ringMat);
+                    const r2 = new THREE.Mesh(new THREE.TorusGeometry(type.size, type.size*0.1, 8, 16), ringMat);
+                    r2.rotation.x = Math.PI / 2;
+                    group.add(core, r1, r2);
+                } else if (type.type === 'universe') {
+                    const coreMat = new THREE.MeshBasicMaterial({ color: 0x000000 }); // Black hole core
+                    const core = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.6, 16, 16), coreMat);
+                    const glow = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.8, 16, 16), new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.5}));
+                    const ringMat = new THREE.MeshBasicMaterial({color: 0xfacc15, side: THREE.DoubleSide});
+                    const ring = new THREE.Mesh(new THREE.RingGeometry(type.size, type.size*1.3, 32), ringMat);
+                    ring.rotation.x = Math.PI / 3;
+                    group.add(core, glow, ring);
+                } else if (type.type === 'hourglass') {
+                    const c1 = new THREE.Mesh(new THREE.ConeGeometry(type.size*0.5, type.size, 16), mat);
+                    const c2 = new THREE.Mesh(new THREE.ConeGeometry(type.size*0.5, type.size, 16), mat);
+                    c1.position.y = type.size*0.5;
+                    c2.position.y = -type.size*0.5;
+                    c2.rotation.x = Math.PI;
+                    group.add(c1, c2);
+                } else if (type.type === 'sun_flame') {
+                    const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(type.size, 0), new THREE.MeshLambertMaterial({color: 0xf97316, emissive: 0xb45309}));
+                    group.add(mesh);
+                } else if (type.type === 'glitch_frag') {
+                    for(let i=0; i<3; i++) {
+                        const m = new THREE.Mesh(new THREE.BoxGeometry(type.size*0.5, type.size*0.5, type.size*0.5), mat);
+                        m.position.set((Math.random()-0.5)*type.size, (Math.random()-0.5)*type.size, (Math.random()-0.5)*type.size);
+                        group.add(m);
+                    }
+                } else if (type.type === 'halo') {
+                    const mesh = new THREE.Mesh(new THREE.TorusGeometry(type.size, type.size*0.2, 8, 32), mat);
+                    mesh.rotation.x = Math.PI/2;
+                    group.add(mesh);
+                } else if (type.type === 'mana_gem') {
+                    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(type.size, 0), mat);
+                    mesh.scale.set(0.5, 1.5, 0.5);
+                    group.add(mesh);
+                } else if (type.type === 'tesseract') {
+                    const m1 = new THREE.Mesh(new THREE.BoxGeometry(type.size, type.size, type.size), new THREE.MeshBasicMaterial({color: type.color, wireframe: true}));
+                    const m2 = new THREE.Mesh(new THREE.BoxGeometry(type.size*0.5, type.size*0.5, type.size*0.5), new THREE.MeshBasicMaterial({color: type.color, wireframe: true}));
+                    group.add(m1, m2);
+                } else if (type.type === 'dark_matter') {
+                    const m1 = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.6, 16, 16), mat);
+                    const m2 = new THREE.Mesh(new THREE.SphereGeometry(type.size, 16, 16), new THREE.MeshLambertMaterial({color: 0x4c1d95, transparent: true, opacity: 0.5}));
+                    group.add(m1, m2);
+                } else if (type.type === 'abstract_thought') {
+                    const m1 = new THREE.Mesh(new THREE.TorusGeometry(type.size*0.8, type.size*0.2, 8, 16), mat);
+                    const m2 = new THREE.Mesh(new THREE.TorusGeometry(type.size*0.8, type.size*0.2, 8, 16), mat);
+                    m2.rotation.x = Math.PI/2;
+                    group.add(m1, m2);
+                } else if (type.type === 'omni_seed') {
+                    const m1 = new THREE.Mesh(new THREE.SphereGeometry(type.size*0.5, 16, 16), mat);
+                    const m2 = new THREE.Mesh(new THREE.RingGeometry(type.size*0.8, type.size, 32), new THREE.MeshBasicMaterial({color: 0xffffff, side: THREE.DoubleSide}));
+                    const m3 = new THREE.Mesh(new THREE.RingGeometry(type.size*0.8, type.size, 32), new THREE.MeshBasicMaterial({color: 0xffffff, side: THREE.DoubleSide}));
+                    m2.rotation.x = Math.PI/2;
+                    m3.rotation.y = Math.PI/2;
+                    group.add(m1, m2, m3);
+                } else if (type.type === 'source_code') {
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(type.size, type.size, type.size), new THREE.MeshBasicMaterial({color: 0x00ff00, wireframe: true}));
+                    const core = new THREE.Mesh(new THREE.BoxGeometry(type.size*0.8, type.size*0.8, type.size*0.8), new THREE.MeshBasicMaterial({color: 0x000000}));
+                    group.add(mesh, core);
+                } else if (type.type === '4d_cube') {
+                    const m1 = new THREE.Mesh(new THREE.BoxGeometry(type.size, type.size, type.size), new THREE.MeshBasicMaterial({color: 0x8b5cf6, wireframe: true}));
+                    const m2 = new THREE.Mesh(new THREE.BoxGeometry(type.size*0.6, type.size*0.6, type.size*0.6), new THREE.MeshBasicMaterial({color: 0xc4b5fd, wireframe: true}));
+                    m1.rotation.x = Math.PI/4; m2.rotation.y = Math.PI/4;
+                    group.add(m1, m2);
+                } else if (type.type === 'golden_apple') {
+                    const m = new THREE.Mesh(new THREE.SphereGeometry(type.size, 16, 16), mat);
+                    const stem = new THREE.Mesh(new THREE.CylinderGeometry(type.size*0.1, type.size*0.1, type.size*0.5), new THREE.MeshLambertMaterial({color: 0x78350f}));
+                    stem.position.y = type.size;
+                    group.add(m, stem);
+                } else if (type.type === 'accretion_dust') {
+                    const m = new THREE.Mesh(new THREE.TorusGeometry(type.size, type.size*0.3, 16, 32), mat);
+                    m.rotation.x = Math.PI/2;
+                    group.add(m);
+                } else if (type.type === 'sim_token') {
+                    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(type.size, 0), new THREE.MeshBasicMaterial({color: type.color, wireframe: true}));
+                    group.add(m);
+                } else if (type.type === 'coffee_cup') {
+                    const m = new THREE.Mesh(new THREE.CylinderGeometry(type.size*0.6, type.size*0.5, type.size*1.2, 16), mat);
+                    const handle = new THREE.Mesh(new THREE.TorusGeometry(type.size*0.4, type.size*0.1, 8, 16), mat);
+                    handle.position.x = type.size*0.6;
+                    group.add(m, handle);
+                }
+                
+                // PERFORMANCE: Disabled shadows on food to save thousands of draw calls
+                // group.traverse(c => { if(c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+                return group;
+            }
+
+            function getRandomFoodType() {
+                let totalWeight = FOOD_TYPES.reduce((acc, curr) => acc + curr.weight, 0);
+                let random = Math.random() * totalWeight;
+                for (let type of FOOD_TYPES) {
+                    if (random < type.weight) return type;
+                    random -= type.weight;
+                }
+                return FOOD_TYPES[0];
+            }
+
+            function spawnFood(specificType = null) {
+                const type = specificType || getRandomFoodType();
+                const meshGroup = createFoodMesh(type);
+                
+                let spawnX, spawnZ;
+                const area = POND_AREAS.find(a => a.foodType === type.type);
+                
+                if (area) {
+                    // Spawn exclusively inside its designated biome
+                    const r = Math.random() * (area.radius * 0.9);
+                    const angle = Math.random() * Math.PI * 2;
+                    spawnX = area.x + Math.cos(angle) * r;
+                    spawnZ = area.z + Math.sin(angle) * r;
+                } else if (type.type === 'seed') {
+                    // Force starter food (seeds) to cluster around the (0,0) spawn area
+                    // using a random radius up to 800 to ensure plenty of food for new players
+                    const r = Math.random() * 800; 
+                    const angle = Math.random() * Math.PI * 2;
+                    spawnX = Math.cos(angle) * r;
+                    spawnZ = Math.sin(angle) * r;
+                } else {
+                    // Spawn in open water, attempt to avoid biomes
+                    let valid = false;
+                    let attempts = 0;
+                    while(!valid && attempts < 10) {
+                        spawnX = (Math.random() - 0.5) * WORLD_SIZE;
+                        spawnZ = (Math.random() - 0.5) * WORLD_SIZE;
+                        valid = true;
+                        for(let a of POND_AREAS) {
+                            if (Math.hypot(spawnX - a.x, spawnZ - a.z) < a.radius) {
+                                valid = false; break;
+                            }
+                        }
+                        attempts++;
+                    }
+                }
+                
+                meshGroup.position.set(spawnX, 5, spawnZ);
+
+                scene.add(meshGroup);
+                foods.push({
+                    mesh: meshGroup,
+                    type: type,
+                    floatOffset: Math.random() * Math.PI * 2
+                });
+            }
+
+            function createExplosion(pos, color, amount) {
+                const geo = new THREE.BoxGeometry(2, 2, 2);
+                const mat = new THREE.MeshLambertMaterial({ color: color });
+                for (let i = 0; i < amount; i++) {
+                    const mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.copy(pos);
+                    mesh.position.y += 5;
+                    scene.add(mesh);
+                    particles.push({
+                        mesh: mesh,
+                        vx: (Math.random() - 0.5) * 6,
+                        vy: Math.random() * 5 + 2,
+                        vz: (Math.random() - 0.5) * 6,
+                        life: 1.0
+                    });
+                }
+            }
+
+            function showFloatingText(pos, text, colorCSS) {
+                const div = document.createElement('div');
+                div.innerText = text;
+                div.className = 'absolute font-black text-2xl drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] pointer-events-none transform -translate-x-1/2 -translate-y-1/2';
+                div.style.color = colorCSS;
+                floatingContainer.appendChild(div);
+
+                let life = 1.0;
+                const startY = pos.y;
+                
+                function animateText() {
+                    life -= 0.02;
+                    if (life <= 0) {
+                        div.remove();
+                        return;
+                    }
+                    
+                    const tempPos = pos.clone();
+                    tempPos.y = startY + (1 - life) * 40;
+                    
+                    tempPos.project(camera);
+                    const xScreen = (tempPos.x * 0.5 + 0.5) * window.innerWidth;
+                    const yScreen = (tempPos.y * -0.5 + 0.5) * window.innerHeight;
+
+                    div.style.left = `${xScreen}px`;
+                    div.style.top = `${yScreen}px`;
+                    div.style.opacity = life;
+                    div.style.transform = `translate(-50%, -50%) scale(${1 + (1-life)*0.5})`;
+
+                    requestAnimationFrame(animateText);
+                }
+                animateText();
+            }
+
+            function checkEvolution() {
+                const currentStage = EVOLUTIONS[player.stageIndex];
+                if (player.xp >= currentStage.maxExp && player.stageIndex < EVOLUTIONS.length - 1) {
+                    player.xp -= currentStage.maxExp;
+                    player.stageIndex++;
+                    
+                    const newStage = EVOLUTIONS[player.stageIndex];
+                    loadPlayerModel(player.stageIndex);
+                    createExplosion(player.group.position, 0xffd700, 40);
+                    
+                    levelUpEmoji.innerText = newStage.emoji;
+                    levelUpName.innerText = newStage.name;
+                    levelUpNotification.style.opacity = '1';
+                    levelUpContent.style.transform = 'scale(1.1)';
+                    
+                    setTimeout(() => levelUpContent.style.transform = 'scale(1)', 100);
+                    setTimeout(() => levelUpNotification.style.opacity = '0', 3000);
+
+                    // Auto-save on evolution
+                    saveProgress();
+                }
+                updateUI();
+            }
+
+            function updateUI() {
+                const stage = EVOLUTIONS[player.stageIndex];
+                levelUi.innerText = stage.level;
+                duckNameUi.innerText = stage.name;
+                currentEmojiUi.innerText = stage.emoji;
+                scoreUi.innerText = score;
+                
+                if (stage.maxExp === Infinity) {
+                    xpText.innerText = "MAX LEVEL";
+                    xpFill.style.width = "100%";
+                    xpFill.className = "h-full bg-gradient-to-r from-yellow-400 to-yellow-200 rounded-full w-full relative";
+                } else {
+                    xpText.innerText = `${player.xp} / ${stage.maxExp}`;
+                    const percentage = Math.min(100, (player.xp / stage.maxExp) * 100);
+                    xpFill.style.width = `${percentage}%`;
+                }
+            }
+
+            // Initialize Game
+            loadPlayerModel(0);
+            for (let i = 0; i < FOOD_COUNT; i++) spawnFood();
+
+            // Animation Loop
+            const clock = new THREE.Clock();
+            let lastSyncTime = 0;
+            
+            function animate() {
+                requestAnimationFrame(animate);
+                const delta = clock.getDelta();
+                const time = clock.getElapsedTime();
+                const stage = EVOLUTIONS[player.stageIndex];
+
+                // 1. Inputs & Steering (Tank Controls)
+                let dx = 0;
+                let dz = 0;
+
+                // Handle keyboard turning (slowed down from 0.05 to 0.015)
+                if (keys.a || keys.arrowleft) player.targetRotation += 0.015;
+                if (keys.d || keys.arrowright) player.targetRotation -= 0.015;
+
+                // Handle forward/backward
+                let forward = 0;
+                if (keys.w || keys.arrowup) forward = 1;
+                if (keys.s || keys.arrowdown) forward = -0.6; // Backward is slightly slower
+
+                if (isLeftMouseDown) {
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObject(raycastPlane);
+                    if (intersects.length > 0) {
+                        mouseWorldPos.copy(intersects[0].point);
+                        const dir = new THREE.Vector3().subVectors(mouseWorldPos, player.group.position);
+                        dir.y = 0;
+                        if (dir.length() > 5) {
+                            // Steer towards mouse position
+                            player.targetRotation = Math.atan2(dir.x, dir.z);
+                            forward = 1; // Move forward when steering with mouse
+                        }
+                    }
+                }
+                
+                if (forward !== 0) {
+                    // Move forward based on where we are ACTUALLY rotated (makes turns much wider/slower)
+                    dx = Math.sin(player.group.rotation.y) * forward;
+                    dz = Math.cos(player.group.rotation.y) * forward;
+                }
+
+                // 2. Velocity & Movement
+                player.vx += (dx * stage.speed - player.vx) * 0.1;
+                player.vz += (dz * stage.speed - player.vz) * 0.1;
+
+                player.group.position.x += player.vx;
+                player.group.position.z += player.vz;
+
+                // Clamp to bounds
+                const limit = WORLD_SIZE / 2 - stage.size;
+                player.group.position.x = Math.max(-limit, Math.min(limit, player.group.position.x));
+                player.group.position.z = Math.max(-limit, Math.min(limit, player.group.position.z));
+
+                // Area Barrier Collision & Animation
+                POND_AREAS.forEach(area => {
+                    if (area.barrierMesh) {
+                        // Check if player's current level (stageIndex + 1) unlocks this area
+                        if (player.stageIndex + 1 >= area.unlockLevel) {
+                            area.barrierMesh.visible = false;
+                        } else {
+                            area.barrierMesh.visible = true;
+                            area.barrierMesh.rotation.y -= delta * 0.2; // Spin forcefield
+                            
+                            // Prevent entering
+                            const dist = Math.hypot(player.group.position.x - area.x, player.group.position.z - area.z);
+                            if (dist < area.radius + stage.size) {
+                                // Push player out of barrier
+                                const angle = Math.atan2(player.group.position.z - area.z, player.group.position.x - area.x);
+                                player.group.position.x = area.x + Math.cos(angle) * (area.radius + stage.size);
+                                player.group.position.z = area.z + Math.sin(angle) * (area.radius + stage.size);
+                                player.vx *= -0.5; // Kill momentum
+                                player.vz *= -0.5;
+                                
+                                // Show floating rejection text
+                                if (!area.lastHitTime || time - area.lastHitTime > 1.5) {
+                                    area.lastHitTime = time;
+                                    showFloatingText(player.group.position, `Requires Level ${area.unlockLevel}!`, '#ef4444');
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // 3. Rotation & Animation
+                const speedMag = Math.hypot(player.vx, player.vz);
+                if (speedMag > 0.1) {
+                    // player.targetRotation is now explicitly managed by inputs, no longer overwritten by velocity!
+                    player.wobble += speedMag * 0.15; // Increased wobble slightly because movement is slower
+                    
+                    // Wobble inner model cleanly
+                    player.modelGroup.rotation.z = Math.sin(player.wobble) * 0.1;
+                    player.modelGroup.position.y = Math.abs(Math.sin(player.wobble * 2)) * (stage.size * 0.15);
+                    
+                    // Wing Flapping
+                    if(player.group.userData.wings && player.group.userData.wings.length >= 2) {
+                        for(let w=0; w<player.group.userData.wings.length; w+=2) {
+                            if(player.group.userData.wings[w+1]) {
+                                player.group.userData.wings[w].rotation.z = Math.sin(player.wobble*2)*0.5;
+                                player.group.userData.wings[w+1].rotation.z = -Math.sin(player.wobble*2)*0.5;
+                            }
+                        }
+                    }
+
+                    if(Math.random() < 0.2) {
+                        createExplosion(new THREE.Vector3(player.group.position.x, 0, player.group.position.z), 0xffffff, 1);
+                    }
+                } else {
+                    player.modelGroup.rotation.z *= 0.9;
+                    player.modelGroup.position.y *= 0.9;
+                    if(player.group.userData.wings && player.group.userData.wings.length >= 2) {
+                        for(let w=0; w<player.group.userData.wings.length; w++) {
+                            player.group.userData.wings[w].rotation.z *= 0.9;
+                        }
+                    }
+                }
+
+                // Handle generic spinners attached to the model
+                if (player.modelGroup.userData.spinners) {
+                    player.modelGroup.userData.spinners.forEach((spinner, idx) => {
+                        spinner.rotation.x += 0.01 + (idx*0.005);
+                        spinner.rotation.y += 0.02;
+                        spinner.rotation.z += 0.015;
+                    });
+                }
+
+                // Smooth rotation of root object
+                let rotDiff = player.targetRotation - player.group.rotation.y;
+                while(rotDiff > Math.PI) rotDiff -= Math.PI * 2;
+                while(rotDiff < -Math.PI) rotDiff += Math.PI * 2;
+                // Slower visual catching up to target rotation to feel heavier and wider
+                player.group.rotation.y += rotDiff * 0.04;
+
+                // MULTIPLAYER SYNC & OTHER PLAYER ANIMATION
+                if (isOnline && userId && playerDocRef) {
+                    const now = Date.now();
+                    if (now - lastSyncTime > 100) { // Sync to server 10 times a second
+                        setDoc(playerDocRef, {
+                            x: player.group.position.x,
+                            z: player.group.position.z,
+                            rot: player.group.rotation.y,
+                            stageIndex: player.stageIndex,
+                            wobble: player.wobble,
+                            timestamp: now
+                        }, { merge: true }).catch(e => console.error(e));
+                        lastSyncTime = now;
+                    }
+                }
+
+                for (const uid in otherPlayers) {
+                    const op = otherPlayers[uid];
+                    
+                    // Lerp position for smooth movement despite network delay
+                    op.group.position.x += (op.targetX - op.group.position.x) * 0.1;
+                    op.group.position.z += (op.targetZ - op.group.position.z) * 0.1;
+
+                    let oRotDiff = op.targetRot - op.group.rotation.y;
+                    while(oRotDiff > Math.PI) oRotDiff -= Math.PI * 2;
+                    while(oRotDiff < -Math.PI) oRotDiff += Math.PI * 2;
+                    op.group.rotation.y += oRotDiff * 0.1;
+
+                    // Apply animation wobble locally based on their speed
+                    const speed = Math.hypot(op.targetX - op.group.position.x, op.targetZ - op.group.position.z);
+                    if (speed > 0.5) {
+                        op.wobble += speed * 0.05;
+                        const stageSize = EVOLUTIONS[op.stageIndex].size;
+                        op.modelGroup.rotation.z = Math.sin(op.wobble) * 0.1;
+                        op.modelGroup.position.y = Math.abs(Math.sin(op.wobble * 2)) * (stageSize * 0.15);
+
+                        if(op.group.userData.wings && op.group.userData.wings.length >= 2) {
+                            for(let w=0; w<op.group.userData.wings.length; w+=2) {
+                                if(op.group.userData.wings[w+1]) {
+                                    op.group.userData.wings[w].rotation.z = Math.sin(op.wobble*2)*0.5;
+                                    op.group.userData.wings[w+1].rotation.z = -Math.sin(op.wobble*2)*0.5;
+                                }
+                            }
+                        }
+                    } else {
+                        op.modelGroup.rotation.z *= 0.9;
+                        op.modelGroup.position.y *= 0.9;
+                        if(op.group.userData.wings && op.group.userData.wings.length >= 2) {
+                            for(let w=0; w<op.group.userData.wings.length; w++) {
+                                op.group.userData.wings[w].rotation.z *= 0.9;
+                            }
+                        }
+                    }
+
+                    // Spin parts for other players if they exist
+                    if (op.modelGroup.userData.spinners) {
+                        op.modelGroup.userData.spinners.forEach((spinner, idx) => {
+                            spinner.rotation.x += 0.01 + (idx*0.005);
+                            spinner.rotation.y += 0.02;
+                            spinner.rotation.z += 0.015;
+                        });
+                    }
+                }
+
+                // Infinite food regeneration: actively keep the pond completely full
+                let foodsToSpawn = Math.min(5, MAX_FOOD - foods.length);
+                for (let f = 0; f < foodsToSpawn; f++) {
+                    spawnFood();
+                }
+
+                // 4. Food Logic
+                for (let i = foods.length - 1; i >= 0; i--) {
+                    const food = foods[i];
+                    
+                    // PERFORMANCE: Only calculate math, animate, and check collision for food close to the player
+                    const dist = player.group.position.distanceTo(food.mesh.position);
+                    if (dist < 2000) {
+                        food.mesh.position.y = 5 + Math.sin(time * 3 + food.floatOffset) * 3;
+                        food.mesh.rotation.y += 0.02;
+                        food.mesh.rotation.x = Math.sin(time + food.floatOffset) * 0.2;
+
+                        if (dist < stage.size + food.type.size) {
+                            player.xp += food.type.xp;
+                            score += food.type.xp;
+                            
+                            createExplosion(food.mesh.position, food.type.color, 8);
+                            showFloatingText(food.mesh.position, `+${food.type.xp}`, '#4ade80');
+                            
+                            const eatenType = food.type; // Save type before splicing
+                            
+                            scene.remove(food.mesh);
+                            foods.splice(i, 1);
+                            
+                            // 1-for-1 Exact Replacement! This prevents biomes from ever emptying out.
+                            spawnFood(eatenType);
+                            
+                            checkEvolution();
+                        }
+                    }
+                }
+
+                // 5. Particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.mesh.position.x += p.vx;
+                    p.mesh.position.y += p.vy;
+                    p.mesh.position.z += p.vz;
+                    p.vy -= 0.2; // Gravity
+                    
+                    p.mesh.rotation.x += 0.1;
+                    p.mesh.rotation.y += 0.1;
+                    
+                    p.life -= 0.03;
+                    p.mesh.scale.setScalar(Math.max(0, p.life));
+                    
+                    if (p.life <= 0 || p.mesh.position.y < -5) {
+                        scene.remove(p.mesh);
+                        particles.splice(i, 1);
+                    }
+                }
+
+                // 6. Camera Follow (3rd Person Chase)
+                const camDist = (100 + stage.size * 2.5) * cameraZoom;
+                const camHeight = (50 + stage.size * 1.5) * cameraZoom;
+                
+                // Auto-recenter camera gently if moving and not dragging
+                const isMoving = forward !== 0 || isLeftMouseDown || keys.a || keys.arrowleft || keys.d || keys.arrowright;
+                if (!isRightMouseDown && isMoving) {
+                    cameraAngleOffset *= 0.95;
+                }
+
+                // Track firmly behind the duck based on its actual rotation + the drag offset
+                const camRot = player.group.rotation.y + cameraAngleOffset;
+
+                const targetCamPos = new THREE.Vector3(
+                    player.group.position.x - Math.sin(camRot) * camDist,
+                    player.group.position.y + camHeight,
+                    player.group.position.z - Math.cos(camRot) * camDist
+                );
+
+                // Add slight panning if left mouse is down for a dynamic feel
+                if (isLeftMouseDown) {
+                    targetCamPos.x += mouse.x * 20;
+                    targetCamPos.z -= mouse.y * 20;
+                }
+
+                camera.position.lerp(targetCamPos, 0.06);
+
+                // Look smoothly slightly ahead of the camera's angle
+                const targetLookAt = new THREE.Vector3(
+                    player.group.position.x + Math.sin(camRot) * 20,
+                    player.group.position.y + stage.size,
+                    player.group.position.z + Math.cos(camRot) * 20
+                );
+
+                if (!camera.userData.targetLookAt) {
+                    camera.userData.targetLookAt = new THREE.Vector3().copy(player.group.position);
+                }
+                camera.userData.targetLookAt.lerp(targetLookAt, 0.1);
+                camera.lookAt(camera.userData.targetLookAt);
+
+                renderer.render(scene, camera);
+            }
+
+            animate();
+        }
+    </script>
+</body>
+</html>
