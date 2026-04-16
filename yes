@@ -130,11 +130,11 @@
 
             const scene = new THREE.Scene();
             scene.background = new THREE.Color(0x7dd3fc); // Sky blue
-            // PERFORMANCE: Adjusted fog slightly to hide the optimized render distance
-            scene.fog = new THREE.FogExp2(0x7dd3fc, 0.00025);
+            // Massively reduced fog density to see even further clearly
+            scene.fog = new THREE.FogExp2(0x7dd3fc, 0.00002);
 
-            // PERFORMANCE: Set render distance to 8000 to keep draw calls low while maintaining visibility
-            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 8000);
+            // Increased render distance to see distant biomes
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 30000);
             camera.position.set(0, 100, 200); // Set initial pos to avoid fly-in glitch
 
             // Lighting
