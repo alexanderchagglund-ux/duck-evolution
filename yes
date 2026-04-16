@@ -63,6 +63,13 @@
                     <button id="save-btn" class="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors w-full">Save Game</button>
                     <button id="reset-btn" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors w-full">Reset Progress</button>
                 </div>
+                
+                <!-- Multiplayer Room Controls -->
+                <div class="bg-white/80 backdrop-blur-sm rounded-xl p-3 shadow-lg border border-white/50 text-right pointer-events-auto flex flex-col gap-2 w-full">
+                    <p class="text-xs font-semibold text-gray-600 text-center">Multiplayer Room</p>
+                    <input type="text" id="room-input" value="Global" class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-center font-bold text-gray-700">
+                    <button id="join-room-btn" class="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1.5 px-3 rounded shadow transition-colors w-full">Join Room</button>
+                </div>
             </div>
         </div>
 
@@ -118,15 +125,16 @@
             const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            // PERFORMANCE: Changed to BasicShadowMap which is much faster than PCFSoftShadowMap
+            renderer.shadowMap.type = THREE.BasicShadowMap;
 
             const scene = new THREE.Scene();
             scene.background = new THREE.Color(0x7dd3fc); // Sky blue
-            // PERFORMANCE: Increased fog slightly to hide the shorter render distance
-            scene.fog = new THREE.FogExp2(0x7dd3fc, 0.00015);
+            // PERFORMANCE: Adjusted fog slightly to hide the optimized render distance
+            scene.fog = new THREE.FogExp2(0x7dd3fc, 0.00025);
 
-            // PERFORMANCE: Reduced camera render distance from 35000 to 10000 to heavily reduce GPU load
-            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+            // PERFORMANCE: Set render distance to 8000 to keep draw calls low while maintaining visibility
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 8000);
             camera.position.set(0, 100, 200); // Set initial pos to avoid fly-in glitch
 
             // Lighting
@@ -437,22 +445,28 @@
                 }
             });
 
-            // Detailed Lilypads (Global)
+            // Detailed Lilypads (Global) - PERFORMANCE: Shared Geometries
             const lilyMat = new THREE.MeshLambertMaterial({ color: 0x22c55e });
             const flowerMat = new THREE.MeshLambertMaterial({ color: 0xff69b4 });
+            const sharedFlowerGeo = new THREE.DodecahedronGeometry(4, 0);
+            
+            const lilyGeos = [];
+            for (let i = 0; i < 5; i++) {
+                const s = 10 + i * 2.5;
+                // Reduced segments from 16 to 8 for massive performance boost
+                lilyGeos.push(new THREE.CylinderGeometry(s, s, 2, 8, 1, false, 0, Math.PI * 1.8)); 
+            }
+
             for (let i = 0; i < 200; i++) {
-                const size = Math.random() * 20 + 10;
-                // Pac-man shaped lilypad (slice taken out)
-                const lilyGeo = new THREE.CylinderGeometry(size, size, 2, 16, 1, false, 0, Math.PI * 1.8);
-                const lily = new THREE.Mesh(lilyGeo, lilyMat);
+                const sizeIndex = Math.floor(Math.random() * 5);
+                const lily = new THREE.Mesh(lilyGeos[sizeIndex], lilyMat);
                 lily.position.set((Math.random() - 0.5) * 5000, 1.5, (Math.random() - 0.5) * 5000);
                 lily.rotation.y = Math.random() * Math.PI * 2;
                 lily.receiveShadow = true;
                 
-                // Add a cute lotus flower to some lilypads
                 if (Math.random() < 0.3) {
-                    const flower = new THREE.Mesh(new THREE.DodecahedronGeometry(size*0.25, 0), flowerMat);
-                    flower.position.set(size*0.4, 1.5, size*0.2);
+                    const flower = new THREE.Mesh(sharedFlowerGeo, flowerMat);
+                    flower.position.set(10, 1.5, 5);
                     flower.castShadow = true;
                     lily.add(flower);
                 }
@@ -461,39 +475,39 @@
 
             // Game Configuration
             const WORLD_SIZE = 40000; // Massively increased bounds to fit the new layout without hitting walls
-            const FOOD_COUNT = 2500; // Increased for lush biomes
-            const MAX_FOOD = 2500;
+            const FOOD_COUNT = 1500; // PERFORMANCE: Lowered slightly to save thousands of loop cycles
+            const MAX_FOOD = 1500;
             
-            // Reduced speeds across all evolutions for better control
+            // Massively increased speeds across all evolutions to make them faster
             const EVOLUTIONS = [
-                { level: 1, name: "Baby Duck", emoji: "🐥", size: 6, speed: 1.2, maxExp: 100, colors: { body: 0xffd700, head: 0xffec8b, beak: 0xff8c00 } },
-                { level: 2, name: "Normal Duck", emoji: "🦆", size: 10, speed: 1.5, maxExp: 400, colors: { body: 0x8b4513, head: 0x228b22, beak: 0xffd700 } },
-                { level: 3, name: "Wild Goose", emoji: "🪿", size: 15, speed: 1.8, maxExp: 1000, colors: { body: 0xa9a9a9, head: 0x808080, beak: 0xd2691e } },
-                { level: 4, name: "Majestic Swan", emoji: "🦢", size: 22, speed: 2.1, maxExp: 2500, colors: { body: 0xffffff, head: 0xffffff, beak: 0xffa500 } },
-                { level: 5, name: "Prehistoric Quack", emoji: "🦖", size: 28, speed: 2.4, maxExp: 6000, colors: { body: 0x166534, head: 0x14532d, beak: 0xd4d4d8 } },
-                { level: 6, name: "Mecha Mallard", emoji: "🤖", size: 34, speed: 2.8, maxExp: 15000, colors: { body: 0x9ca3af, head: 0x4b5563, beak: 0xf97316 } },
-                { level: 7, name: "Cosmic Dragon", emoji: "🐉", size: 45, speed: 3.2, maxExp: 35000, colors: { body: 0x4b0082, head: 0x8a2be2, beak: 0xffd700 } },
-                { level: 8, name: "Galactic Emperor", emoji: "👑", size: 55, speed: 3.6, maxExp: 80000, colors: { body: 0xffffff, head: 0xffffff, beak: 0xfacc15 } },
-                { level: 9, name: "Quantum Duck", emoji: "⚛️", size: 70, speed: 4.0, maxExp: 180000, colors: { body: 0x06b6d4, head: 0x06b6d4, beak: 0x22d3ee } },
-                { level: 10, name: "Multiverse Creator", emoji: "👁️", size: 90, speed: 4.5, maxExp: 400000, colors: { body: 0xfacc15, head: 0xfacc15, beak: 0xffffff } },
-                { level: 11, name: "Chrono Duck", emoji: "⏳", size: 110, speed: 4.8, maxExp: 900000, colors: { body: 0xb45309, head: 0xd97706, beak: 0x78350f } },
-                { level: 12, name: "Celestial Phoenix", emoji: "🔥", size: 130, speed: 5.1, maxExp: 2000000, colors: { body: 0xef4444, head: 0xf97316, beak: 0xfacc15 } },
-                { level: 13, name: "Void Glitch", emoji: "👾", size: 150, speed: 5.4, maxExp: 4500000, colors: { body: 0x000000, head: 0x10b981, beak: 0x000000 } },
-                { level: 14, name: "Neon Seraphim", emoji: "👼", size: 175, speed: 5.7, maxExp: 10000000, colors: { body: 0xffffff, head: 0xfef08a, beak: 0xfde047 } },
-                { level: 15, name: "Crystal Leviathan", emoji: "💎", size: 200, speed: 6.0, maxExp: 25000000, colors: { body: 0x67e8f9, head: 0x22d3ee, beak: 0x0891b2 } },
-                { level: 16, name: "Hyper-Prism", emoji: "🔺", size: 230, speed: 6.3, maxExp: 60000000, colors: { body: 0xd946ef, head: 0xf0abfc, beak: 0xc026d3 } },
-                { level: 17, name: "Stellar Devourer", emoji: "🌌", size: 260, speed: 6.6, maxExp: 150000000, colors: { body: 0x020617, head: 0x0f172a, beak: 0x1e293b } },
-                { level: 18, name: "Concept of Quack", emoji: "🧠", size: 300, speed: 6.9, maxExp: 400000000, colors: { body: 0x8b5cf6, head: 0xa78bfa, beak: 0xc4b5fd } },
-                { level: 19, name: "Omniversal Overlord", emoji: "♾️", size: 350, speed: 7.2, maxExp: 1000000000, colors: { body: 0xffffff, head: 0x000000, beak: 0xff0000 } },
-                { level: 20, name: "The Architect", emoji: "💻", size: 420, speed: 8.0, maxExp: 2500000000, colors: { body: 0x00ff00, head: 0x00ff00, beak: 0x00ff00 } },
+                { level: 1, name: "Baby Duck", emoji: "🐥", size: 6, speed: 2.5, maxExp: 100, colors: { body: 0xffd700, head: 0xffec8b, beak: 0xff8c00 } },
+                { level: 2, name: "Normal Duck", emoji: "🦆", size: 10, speed: 3.0, maxExp: 400, colors: { body: 0x8b4513, head: 0x228b22, beak: 0xffd700 } },
+                { level: 3, name: "Wild Goose", emoji: "🪿", size: 15, speed: 3.6, maxExp: 1000, colors: { body: 0xa9a9a9, head: 0x808080, beak: 0xd2691e } },
+                { level: 4, name: "Majestic Swan", emoji: "🦢", size: 22, speed: 4.2, maxExp: 2500, colors: { body: 0xffffff, head: 0xffffff, beak: 0xffa500 } },
+                { level: 5, name: "Prehistoric Quack", emoji: "🦖", size: 28, speed: 4.8, maxExp: 6000, colors: { body: 0x166534, head: 0x14532d, beak: 0xd4d4d8 } },
+                { level: 6, name: "Mecha Mallard", emoji: "🤖", size: 34, speed: 5.6, maxExp: 15000, colors: { body: 0x9ca3af, head: 0x4b5563, beak: 0xf97316 } },
+                { level: 7, name: "Cosmic Dragon", emoji: "🐉", size: 45, speed: 6.4, maxExp: 35000, colors: { body: 0x4b0082, head: 0x8a2be2, beak: 0xffd700 } },
+                { level: 8, name: "Galactic Emperor", emoji: "👑", size: 55, speed: 7.2, maxExp: 80000, colors: { body: 0xffffff, head: 0xffffff, beak: 0xfacc15 } },
+                { level: 9, name: "Quantum Duck", emoji: "⚛️", size: 70, speed: 8.0, maxExp: 180000, colors: { body: 0x06b6d4, head: 0x06b6d4, beak: 0x22d3ee } },
+                { level: 10, name: "Multiverse Creator", emoji: "👁️", size: 90, speed: 9.0, maxExp: 400000, colors: { body: 0xfacc15, head: 0xfacc15, beak: 0xffffff } },
+                { level: 11, name: "Chrono Duck", emoji: "⏳", size: 110, speed: 9.6, maxExp: 900000, colors: { body: 0xb45309, head: 0xd97706, beak: 0x78350f } },
+                { level: 12, name: "Celestial Phoenix", emoji: "🔥", size: 130, speed: 10.2, maxExp: 2000000, colors: { body: 0xef4444, head: 0xf97316, beak: 0xfacc15 } },
+                { level: 13, name: "Void Glitch", emoji: "👾", size: 150, speed: 10.8, maxExp: 4500000, colors: { body: 0x000000, head: 0x10b981, beak: 0x000000 } },
+                { level: 14, name: "Neon Seraphim", emoji: "👼", size: 175, speed: 11.4, maxExp: 10000000, colors: { body: 0xffffff, head: 0xfef08a, beak: 0xfde047 } },
+                { level: 15, name: "Crystal Leviathan", emoji: "💎", size: 200, speed: 12.0, maxExp: 25000000, colors: { body: 0x67e8f9, head: 0x22d3ee, beak: 0x0891b2 } },
+                { level: 16, name: "Hyper-Prism", emoji: "🔺", size: 230, speed: 12.6, maxExp: 60000000, colors: { body: 0xd946ef, head: 0xf0abfc, beak: 0xc026d3 } },
+                { level: 17, name: "Stellar Devourer", emoji: "🌌", size: 260, speed: 13.2, maxExp: 150000000, colors: { body: 0x020617, head: 0x0f172a, beak: 0x1e293b } },
+                { level: 18, name: "Concept of Quack", emoji: "🧠", size: 300, speed: 13.8, maxExp: 400000000, colors: { body: 0x8b5cf6, head: 0xa78bfa, beak: 0xc4b5fd } },
+                { level: 19, name: "Omniversal Overlord", emoji: "♾️", size: 350, speed: 14.4, maxExp: 1000000000, colors: { body: 0xffffff, head: 0x000000, beak: 0xff0000 } },
+                { level: 20, name: "The Architect", emoji: "💻", size: 420, speed: 16.0, maxExp: 2500000000, colors: { body: 0x00ff00, head: 0x00ff00, beak: 0x00ff00 } },
                 // NEW 21-25 EVOLUTIONS
-                { level: 21, name: "Tesseract Duck", emoji: "🧊", size: 500, speed: 8.5, maxExp: 5000000000, colors: { body: 0x8b5cf6, head: 0xc4b5fd, beak: 0xede9fe } },
-                { level: 22, name: "Yggdrasil Mallard", emoji: "🌳", size: 600, speed: 9.0, maxExp: 15000000000, colors: { body: 0x78350f, head: 0x15803d, beak: 0xfacc15 } },
-                { level: 23, name: "Supermassive Quacksar", emoji: "🌀", size: 750, speed: 9.5, maxExp: 50000000000, colors: { body: 0x000000, head: 0xf97316, beak: 0xffffff } },
-                { level: 24, name: "The Simulation", emoji: "🌌", size: 900, speed: 10.0, maxExp: 150000000000, colors: { body: 0x22d3ee, head: 0x0891b2, beak: 0x67e8f9 } },
-                { level: 25, name: "The Developer", emoji: "👨‍💻", size: 1200, speed: 12.0, maxExp: Infinity, colors: { body: 0x1e293b, head: 0x94a3b8, beak: 0xffffff } },
+                { level: 21, name: "Tesseract Duck", emoji: "🧊", size: 500, speed: 17.0, maxExp: 5000000000, colors: { body: 0x8b5cf6, head: 0xc4b5fd, beak: 0xede9fe } },
+                { level: 22, name: "Yggdrasil Mallard", emoji: "🌳", size: 600, speed: 18.0, maxExp: 15000000000, colors: { body: 0x78350f, head: 0x15803d, beak: 0xfacc15 } },
+                { level: 23, name: "Supermassive Quacksar", emoji: "🌀", size: 750, speed: 19.0, maxExp: 50000000000, colors: { body: 0x000000, head: 0xf97316, beak: 0xffffff } },
+                { level: 24, name: "The Simulation", emoji: "🌌", size: 900, speed: 20.0, maxExp: 150000000000, colors: { body: 0x22d3ee, head: 0x0891b2, beak: 0x67e8f9 } },
+                { level: 25, name: "The Developer", emoji: "👨‍💻", size: 1200, speed: 24.0, maxExp: Infinity, colors: { body: 0x1e293b, head: 0x94a3b8, beak: 0xffffff } },
                 // SECRET EVOLUTION
-                { level: 26, name: "Omega Glitch Duck", emoji: "👾", size: 1500, speed: 15.0, maxExp: Infinity, colors: { body: 0x000000, head: 0xff00ff, beak: 0x00ffff } }
+                { level: 26, name: "Omega Glitch Duck", emoji: "👾", size: 1500, speed: 30.0, maxExp: Infinity, colors: { body: 0x000000, head: 0xff00ff, beak: 0x00ffff } }
             ];
 
             // Re-balanced weights to ensure every biome has an abundance of food
@@ -560,6 +574,7 @@
             let auth, db, appId, userId, playerDocRef, saveDocRef;
             let otherPlayers = {}; // Track other online players
             let unsubscribePlayers = null;
+            let currentRoom = "Global";
 
             if (typeof __firebase_config !== 'undefined') {
                 try {
@@ -604,8 +619,72 @@
                         }
 
                         userId = user.uid;
-                        playerDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', userId);
                         saveDocRef = doc(db, 'artifacts', appId, 'users', userId, 'saveData', 'progress');
+
+                        window.joinRoom = function(roomName) {
+                            if (!userId || !db) return;
+                            
+                            // Cleanup old room listeners and players
+                            if (unsubscribePlayers) {
+                                unsubscribePlayers();
+                                unsubscribePlayers = null;
+                            }
+                            for (const uid in otherPlayers) {
+                                scene.remove(otherPlayers[uid].group);
+                                delete otherPlayers[uid];
+                            }
+                            
+                            currentRoom = roomName.replace(/[^a-zA-Z0-9]/g, '') || "Global"; // Sanitize
+                            document.getElementById('room-input').value = currentRoom;
+                            
+                            // Set new player doc reference
+                            playerDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'players_' + currentRoom, userId);
+                            
+                            // Listen to new room
+                            const playersCol = collection(db, 'artifacts', appId, 'public', 'data', 'players_' + currentRoom);
+                            unsubscribePlayers = onSnapshot(playersCol, (snapshot) => {
+                                const currentUids = new Set();
+                                snapshot.forEach(docSnap => {
+                                    if (docSnap.id === userId) return; // Skip our own local character
+                                    const data = docSnap.data();
+                                    
+                                    // Ignore stale players (disconnected longer than 15 seconds)
+                                    if (Date.now() - data.timestamp > 15000) return;
+                                    
+                                    currentUids.add(docSnap.id);
+                                    
+                                    if (!otherPlayers[docSnap.id]) {
+                                        createOtherPlayer(docSnap.id, data.stageIndex, data.x, data.z, data.rot);
+                                    } else {
+                                        const p = otherPlayers[docSnap.id];
+                                        p.targetX = data.x;
+                                        p.targetZ = data.z;
+                                        p.targetRot = data.rot;
+                                        
+                                        // Re-build model if they evolved!
+                                        if (p.stageIndex !== data.stageIndex) {
+                                            scene.remove(p.group);
+                                            delete otherPlayers[docSnap.id];
+                                            createOtherPlayer(docSnap.id, data.stageIndex, data.x, data.z, data.rot);
+                                        }
+                                    }
+                                });
+                                
+                                // Cleanup players that have left or timed out
+                                for (const uid in otherPlayers) {
+                                    if (!currentUids.has(uid)) {
+                                        scene.remove(otherPlayers[uid].group);
+                                        delete otherPlayers[uid];
+                                    }
+                                }
+                            }, (error) => console.error("Sync error:", error));
+                            
+                            // Force an immediate sync to broadcast presence to the new room
+                            lastSyncTime = 0;
+                        };
+
+                        // Initial join
+                        joinRoom("Global");
 
                         // Load Player Progress
                         try {
@@ -629,44 +708,6 @@
                         } catch (e) {
                             console.error("Failed to load progress:", e);
                         }
-                        
-                        const playersCol = collection(db, 'artifacts', appId, 'public', 'data', 'players');
-                        unsubscribePlayers = onSnapshot(playersCol, (snapshot) => {
-                            const currentUids = new Set();
-                            snapshot.forEach(docSnap => {
-                                if (docSnap.id === userId) return; // Skip our own local character
-                                const data = docSnap.data();
-                                
-                                // Ignore stale players (disconnected longer than 15 seconds)
-                                if (Date.now() - data.timestamp > 15000) return;
-                                
-                                currentUids.add(docSnap.id);
-                                
-                                if (!otherPlayers[docSnap.id]) {
-                                    createOtherPlayer(docSnap.id, data.stageIndex, data.x, data.z, data.rot);
-                                } else {
-                                    const p = otherPlayers[docSnap.id];
-                                    p.targetX = data.x;
-                                    p.targetZ = data.z;
-                                    p.targetRot = data.rot;
-                                    
-                                    // Re-build model if they evolved!
-                                    if (p.stageIndex !== data.stageIndex) {
-                                        scene.remove(p.group);
-                                        delete otherPlayers[docSnap.id];
-                                        createOtherPlayer(docSnap.id, data.stageIndex, data.x, data.z, data.rot);
-                                    }
-                                }
-                            });
-                            
-                            // Cleanup players that have left or timed out
-                            for (const uid in otherPlayers) {
-                                if (!currentUids.has(uid)) {
-                                    scene.remove(otherPlayers[uid].group);
-                                    delete otherPlayers[uid];
-                                }
-                            }
-                        }, (error) => console.error("Sync error:", error));
                     });
                     
                     // Best effort clean up on tab exit
@@ -682,7 +723,13 @@
 
             // Save Progress Function
             async function saveProgress() {
-                if (!isOnline || !saveDocRef) return;
+                if (!isOnline || !saveDocRef) {
+                    const indicator = document.getElementById('save-indicator');
+                    indicator.innerText = "Progress Saved! ✓";
+                    indicator.style.opacity = 1;
+                    setTimeout(() => indicator.style.opacity = 0, 2000);
+                    return;
+                }
                 try {
                     await setDoc(saveDocRef, {
                         stageIndex: player.stageIndex,
@@ -692,6 +739,7 @@
                     }, { merge: true });
                     
                     const indicator = document.getElementById('save-indicator');
+                    indicator.innerText = "Progress Saved! ✓";
                     indicator.style.opacity = 1;
                     setTimeout(() => indicator.style.opacity = 0, 2000);
                 } catch (e) {
@@ -704,6 +752,25 @@
 
             // Bind UI Buttons
             document.getElementById('save-btn').addEventListener('click', saveProgress);
+            
+            document.getElementById('join-room-btn').addEventListener('click', (e) => {
+                const roomInput = document.getElementById('room-input').value;
+                const btn = e.target;
+                if (typeof joinRoom === 'function') {
+                    joinRoom(roomInput);
+                    
+                    // Visual feedback so you know the button worked!
+                    btn.innerText = "Joined Room!";
+                    btn.classList.remove('bg-green-500', 'hover:bg-green-600');
+                    btn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                    
+                    setTimeout(() => {
+                        btn.innerText = "Join Room";
+                        btn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                        btn.classList.add('bg-green-500', 'hover:bg-green-600');
+                    }, 2000);
+                }
+            });
             
             document.getElementById('reset-btn').addEventListener('click', async () => {
                 if (confirm("Are you sure you want to reset your evolution to a Baby Duck? This cannot be undone!")) {
@@ -791,6 +858,7 @@
             }
             
             window.addEventListener('mousedown', (e) => {
+                if (e.target.tagName !== 'CANVAS') return; // Prevent UI clicks from steering the duck!
                 if (e.button === 0) isLeftMouseDown = true;
                 if (e.button === 2) {
                     isRightMouseDown = true;
@@ -815,12 +883,13 @@
             });
             
             window.addEventListener('touchstart', (e) => {
+                if (e.target.tagName !== 'CANVAS') return; // Prevent UI touches from steering the duck!
                 updateMousePos(e.touches[0].clientX, e.touches[0].clientY);
                 isLeftMouseDown = true;
-            }, {passive: false});
+            }, {passive: true});
             window.addEventListener('touchmove', (e) => {
                 updateMousePos(e.touches[0].clientX, e.touches[0].clientY);
-            }, {passive: false});
+            }, {passive: true});
             window.addEventListener('touchend', () => isLeftMouseDown = false);
 
             // Zoom handling
@@ -1531,8 +1600,16 @@
                 updateUI();
             }
 
+            // PERFORMANCE: Prefab Cache to stop creating 2,000 unique geometries!
+            const foodPrefabCache = {};
+
             // Factory: Build Custom Food Models
             function createFoodMesh(type) {
+                if (foodPrefabCache[type.type]) {
+                    // Instantly clone the existing template (Shares memory/geometries!)
+                    return foodPrefabCache[type.type].clone();
+                }
+
                 const group = new THREE.Group();
                 const mat = new THREE.MeshLambertMaterial({ color: type.color });
                 
@@ -1679,7 +1756,9 @@
                 
                 // PERFORMANCE: Disabled shadows on food to save thousands of draw calls
                 // group.traverse(c => { if(c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
-                return group;
+                
+                foodPrefabCache[type.type] = group;
+                return group.clone();
             }
 
             function getRandomFoodType() {
@@ -1739,11 +1818,21 @@
                 });
             }
 
+            // PERFORMANCE: Cache particle geometries and materials
+            const sharedParticleGeo = new THREE.BoxGeometry(2, 2, 2);
+            const particleMatCache = {};
+
             function createExplosion(pos, color, amount) {
-                const geo = new THREE.BoxGeometry(2, 2, 2);
-                const mat = new THREE.MeshLambertMaterial({ color: color });
-                for (let i = 0; i < amount; i++) {
-                    const mesh = new THREE.Mesh(geo, mat);
+                if (!particleMatCache[color]) {
+                    particleMatCache[color] = new THREE.MeshBasicMaterial({ color: color }); // Basic is much faster
+                }
+                const mat = particleMatCache[color];
+                
+                // PERFORMANCE: Cap particles to 15 max to avoid extreme lag spikes
+                const safeAmount = Math.min(amount, 15);
+
+                for (let i = 0; i < safeAmount; i++) {
+                    const mesh = new THREE.Mesh(sharedParticleGeo, mat);
                     mesh.position.copy(pos);
                     mesh.position.y += 5;
                     scene.add(mesh);
@@ -2046,14 +2135,17 @@
                 for (let i = foods.length - 1; i >= 0; i--) {
                     const food = foods[i];
                     
+                    // PERFORMANCE: Use squared distance (massively faster than regular distance)
+                    const distSq = player.group.position.distanceToSquared(food.mesh.position);
+                    
                     // PERFORMANCE: Only calculate math, animate, and check collision for food close to the player
-                    const dist = player.group.position.distanceTo(food.mesh.position);
-                    if (dist < 2000) {
+                    if (distSq < 4000000) { // 2000 * 2000
                         food.mesh.position.y = 5 + Math.sin(time * 3 + food.floatOffset) * 3;
                         food.mesh.rotation.y += 0.02;
                         food.mesh.rotation.x = Math.sin(time + food.floatOffset) * 0.2;
 
-                        if (dist < stage.size + food.type.size) {
+                        const collisionDist = stage.size + food.type.size;
+                        if (distSq < collisionDist * collisionDist) {
                             player.xp += food.type.xp;
                             score += food.type.xp;
                             
